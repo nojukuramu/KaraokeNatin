@@ -1,0 +1,30 @@
+.qr-display {
+    text-align: center;
+}
+
+.qr-container {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+    background: white;
+    border-radius: 15px;
+    margin: 15px 0;
+}
+
+.qr-placeholder {
+    padding: 40px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.room-id {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 10px 0 5px;
+    color: #ffd700;
+}
+
+.url-text {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    word-break: break-all;
+}
