@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { createServer } from 'http';
+import * as net from 'net';
 import {
     HostToServerEvents,
     ClientToServerEvents,
@@ -8,7 +9,7 @@ import {
 } from '@karaokenatin/shared';
 import { RoomManager } from './roomManager';
 
-const PORT = process.env.PORT || 3001;
+const PREFERRED_PORT = parseInt(process.env.PORT || '3001', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 const httpServer = createServer();
@@ -23,6 +24,41 @@ const io = new Server<
 });
 
 const roomManager = new RoomManager();
+
+/**
+ * Check if a port is available
+ */
+function isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const server = net.createServer();
+        server.once('error', () => resolve(false));
+        server.once('listening', () => {
+            server.close();
+            resolve(true);
+        });
+        server.listen(port, '0.0.0.0');
+    });
+}
+
+/**
+ * Find an available port starting from preferred
+ */
+async function findAvailablePort(preferred: number): Promise<number> {
+    if (await isPortAvailable(preferred)) {
+        return preferred;
+    }
+    
+    // Try a range of ports
+    for (let port = preferred + 1; port <= preferred + 100; port++) {
+        if (await isPortAvailable(port)) {
+            console.log(`[Server] Port ${preferred} in use, using ${port} instead`);
+            return port;
+        }
+    }
+    
+    // Use 0 to let OS assign a port
+    return 0;
+}
 
 /**
  * Socket.io connection handler
@@ -149,11 +185,22 @@ function handleDisconnect(socket: any): void {
 }
 
 /**
- * Start server
+ * Start server with port conflict handling
  */
-httpServer.listen(PORT, () => {
-    console.log(`[Server] Signaling server running on port ${PORT}`);
-    console.log(`[Server] CORS origin: ${CORS_ORIGIN}`);
+async function startServer() {
+    const port = await findAvailablePort(PREFERRED_PORT);
+    
+    httpServer.listen(port, '0.0.0.0', () => {
+        const addr = httpServer.address();
+        const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+        console.log(`[Server] Signaling server running on port ${actualPort}`);
+        console.log(`[Server] CORS origin: ${CORS_ORIGIN}`);
+    });
+}
+
+startServer().catch((err) => {
+    console.error('[Server] Failed to start:', err);
+    process.exit(1);
 });
 
 /**

@@ -46,9 +46,19 @@ pub fn run() {
                 });
             });
 
+            // Wait a moment for web server to bind its port
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            
+            // Calculate signaling port based on web server port
+            let web_port = web_server::get_server_port();
+            let signaling_port = 3001_i32 + (web_port as i32 - 8080);
+            let signaling_port = signaling_port.max(1024) as u16; // Ensure valid port
+            
+            log::info!("[Tauri] Web server on port {}, signaling will use port {}", web_port, signaling_port);
+
             // Start Node.js signaling server as sidecar process
-            std::thread::spawn(|| {
-                log::info!("[Tauri] Starting signaling server...");
+            std::thread::spawn(move || {
+                log::info!("[Tauri] Starting signaling server on port {}...", signaling_port);
                 
                 // In development, run from the signaling-server directory
                 #[cfg(all(debug_assertions, target_os = "windows"))]
@@ -56,6 +66,7 @@ pub fn run() {
                     let mut cmd = std::process::Command::new("node");
                     cmd.current_dir("../../signaling-server")
                         .arg("dist/index.js")
+                        .env("PORT", signaling_port.to_string())
                         .creation_flags(CREATE_NO_WINDOW);
                     
                     match cmd.spawn() {
@@ -71,6 +82,7 @@ pub fn run() {
                             let mut fallback = std::process::Command::new("npx");
                             fallback.current_dir("../../signaling-server")
                                 .args(["tsx", "src/index.ts"])
+                                .env("PORT", signaling_port.to_string())
                                 .creation_flags(CREATE_NO_WINDOW);
                             let _ = fallback.spawn();
                         }
@@ -94,7 +106,8 @@ pub fn run() {
                     log::info!("[Tauri] Starting bundled signaling server: {:?}", signaling_path);
                     
                     let mut cmd = std::process::Command::new(&signaling_path);
-                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    cmd.env("PORT", signaling_port.to_string())
+                        .creation_flags(CREATE_NO_WINDOW);
                     
                     match cmd.spawn() {
                         Ok(mut child) => {

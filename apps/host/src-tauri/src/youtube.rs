@@ -36,11 +36,18 @@ fn get_ytdlp_path() -> String {
         "binaries/yt-dlp-x86_64-pc-windows-msvc.exe".to_string()
     }
     
-    // In production, yt-dlp will be bundled with the app
+    // In production, yt-dlp will be bundled alongside the exe
+    // Tauri strips the target triple, so it's just "yt-dlp.exe"
     #[cfg(not(debug_assertions))]
     {
-        // Tauri bundles external binaries in the resource directory
-        "yt-dlp-x86_64-pc-windows-msvc.exe".to_string()
+        use std::env;
+        
+        let exe_dir = env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_default();
+        
+        exe_dir.join("yt-dlp.exe").to_string_lossy().to_string()
     }
 }
 
@@ -62,6 +69,18 @@ pub async fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>
     log::info!("[YouTube] Cache miss, searching for: {}", karaoke_query);
     
     let ytdlp_path = get_ytdlp_path();
+    
+    // Log the path and check if it exists
+    log::info!("[YouTube] Using yt-dlp at: {}", ytdlp_path);
+    
+    #[cfg(not(debug_assertions))]
+    {
+        let path = std::path::Path::new(&ytdlp_path);
+        if !path.exists() {
+            log::error!("[YouTube] yt-dlp not found at: {}", ytdlp_path);
+            return Err(format!("yt-dlp not found at: {}", ytdlp_path));
+        }
+    }
     
     // Build search query (ytsearch:N searches for N results)
     let search_query = format!("ytsearch{}:{}", limit, karaoke_query);

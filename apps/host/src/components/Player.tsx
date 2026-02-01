@@ -135,8 +135,22 @@ const Player = () => {
 
     // Load YouTube IFrame API
     useEffect(() => {
-        if (window.YT) {
+        // Check if YT API is fully loaded (YT exists AND YT.Player is a constructor)
+        if (window.YT && typeof window.YT.Player === 'function') {
             setIsAPIReady(true);
+            return;
+        }
+
+        // If YT exists but Player isn't ready, wait for it
+        if (window.YT) {
+            const checkPlayer = setInterval(() => {
+                if (typeof window.YT.Player === 'function') {
+                    clearInterval(checkPlayer);
+                    setIsAPIReady(true);
+                }
+            }, 100);
+            // Timeout after 10 seconds
+            setTimeout(() => clearInterval(checkPlayer), 10000);
             return;
         }
 

@@ -1,4 +1,5 @@
 use local_ip_address::local_ip;
+use crate::web_server;
 
 /// Get the local IP address of the host machine
 pub fn get_local_ip() -> Result<String, String> {
@@ -10,7 +11,8 @@ pub fn get_local_ip() -> Result<String, String> {
 /// Generate the QR URL for clients to connect
 pub fn generate_qr_url() -> Result<String, String> {
     let ip = get_local_ip()?;
-    Ok(format!("http://{}:8080", ip))
+    let port = web_server::get_server_port();
+    Ok(format!("http://{}:{}", ip, port))
 }
 
 #[cfg(test)]

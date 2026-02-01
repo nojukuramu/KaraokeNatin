@@ -6,13 +6,51 @@ use axum::{
 };
 use tower_http::cors::{CorsLayer, Any};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU16, Ordering};
 
 /// The embedded remote control UI HTML
 const REMOTE_UI_HTML: &str = include_str!("../remote-ui/index.html");
 
+/// Store the actual port being used (for QR code generation)
+static ACTUAL_PORT: AtomicU16 = AtomicU16::new(8080);
+
+/// Get the current server port
+pub fn get_server_port() -> u16 {
+    ACTUAL_PORT.load(Ordering::SeqCst)
+}
+
+/// Check if a port is available
+async fn is_port_available(port: u16) -> bool {
+    tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
+        .await
+        .is_ok()
+}
+
+/// Find an available port starting from the preferred port
+async fn find_available_port(preferred: u16) -> u16 {
+    // Try preferred port first
+    if is_port_available(preferred).await {
+        return preferred;
+    }
+    
+    // Try a range of ports
+    for port in (preferred + 1)..=(preferred + 100) {
+        if is_port_available(port).await {
+            log::info!("[WebServer] Port {} in use, using {} instead", preferred, port);
+            return port;
+        }
+    }
+    
+    // Fallback to OS-assigned port (0)
+    log::warn!("[WebServer] No ports available in range, using OS-assigned port");
+    0
+}
+
 /// Start the embedded web server
 pub async fn start_web_server() -> Result<(), String> {
-    log::info!("[WebServer] Starting embedded web server on port 8080");
+    let port = find_available_port(8080).await;
+    
+    log::info!("[WebServer] Starting embedded web server on port {}", port);
 
     // Create router
     let app = Router::new()
@@ -27,15 +65,21 @@ pub async fn start_web_server() -> Result<(), String> {
                 .allow_headers(Any),
         );
 
-    // Bind to all network interfaces on port 8080
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    // Bind to all network interfaces
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     
-    log::info!("[WebServer] Listening on {}", addr);
-
     // Create TCP listener
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("[WebServer] Failed to bind: {}", e))?;
+    
+    // Store the actual port (in case OS assigned one)
+    let actual_port = listener.local_addr()
+        .map(|a| a.port())
+        .unwrap_or(port);
+    ACTUAL_PORT.store(actual_port, Ordering::SeqCst);
+    
+    log::info!("[WebServer] Listening on port {}", actual_port);
 
     // Start server
     match axum::serve(listener, app).await {

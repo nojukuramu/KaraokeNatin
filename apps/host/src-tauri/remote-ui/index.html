@@ -1554,7 +1554,11 @@
 
         // Connection
         function initConnection() {
-            const signalingUrl = `http://${window.location.hostname}:3001`;
+            // Calculate signaling port: if web server moved from 8080, signaling moves proportionally from 3001
+            // Default: web=8080, signaling=3001. Offset = signaling - web = 3001 - 8080 = -5079
+            const webPort = parseInt(window.location.port) || 8080;
+            const signalingPort = 3001 + (webPort - 8080);
+            const signalingUrl = `http://${window.location.hostname}:${signalingPort}`;
             console.log('[Remote] Connecting to:', signalingUrl);
 
             socket = io(signalingUrl);
