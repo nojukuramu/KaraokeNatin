@@ -4,6 +4,8 @@
 
 KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke parties with your friends and family. No expensive equipment needed - just a computer connected to a TV and everyone's smartphones.
 
+> **📺 Note**: KaraokeNatin uses YouTube for karaoke video content. Please ensure you comply with [YouTube's Terms of Service](https://www.youtube.com/t/terms) when using this application.
+
 ## ✨ Features
 
 ### For Singers
@@ -18,14 +20,14 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 - 🖥️ **Desktop Display**: Full-screen karaoke player perfect for TVs and projectors  
 - 🎬 **YouTube Integration**: Play any karaoke video directly from YouTube
 - 🔄 **Automatic Queue Management**: Songs automatically advance when finished
-- 📡 **Local Network**: Works over WiFi - no internet required once songs are loaded
+- 📡 **Local Network**: Works over Wi-Fi - no internet required once songs are loaded
 - 🆓 **No Subscription**: Completely free to use with no recurring costs
 - 🌐 **Easy Setup**: Share a simple QR code for others to join your karaoke session
 
 ## 🚀 Getting Started
 
 ### For Users (Singers)
-1. Make sure you're connected to the same WiFi network as the karaoke host
+1. Make sure you're connected to the same Wi-Fi network as the karaoke host
 2. The host will show a QR code on the TV screen
 3. Scan the QR code with your phone's camera
 4. Enter your name and start adding songs to the queue!
@@ -65,9 +67,8 @@ This means you're free to use, modify, and distribute this software for personal
 
 ## ⚠️ Important Notes
 
-- KaraokeNatin requires YouTube for video content. Make sure you comply with YouTube's terms of service.
 - This software is provided "as is" without warranty. See the LICENSE file for more information.
-- Best experienced with a stable WiFi network for smooth operation.
+- Best experienced with a stable Wi-Fi network for smooth operation.
 
 ---
 
