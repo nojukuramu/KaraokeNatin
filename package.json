@@ -3,15 +3,18 @@
     "version": "0.1.0",
     "private": true,
     "description": "P2P Karaoke System with Tauri Host and Next.js Web Client",
+    "license": "MIT",
     "scripts": {
-        "dev:signaling": "cd apps/signaling-server && npm run dev",
-        "dev:host": "cd apps/host && npm run tauri:dev",
-        "dev:web": "cd apps/web-client && npm run dev",
-        "build:signaling": "cd apps/signaling-server && npm run build",
-        "build:host": "cd apps/host && npm run tauri:build",
-        "build:web": "cd apps/web-client && npm run build",
-        "setup": "npm install && npm run setup:packages",
-        "setup:packages": "cd packages/shared && npm install && cd ../../apps/signaling-server && npm install && cd ../host && npm install && cd ../web-client && npm install"
+        "dev:signaling": "cd apps/signaling-server && pnpm run dev",
+        "dev:host": "cd apps/host && pnpm run tauri:dev",
+        "dev:web": "cd apps/web-client && pnpm run dev",
+        "build:signaling": "cd apps/signaling-server && pnpm run build",
+        "build:signaling-exe": "cd apps/signaling-server && pnpm run bundle",
+        "build:host": "cd apps/host && pnpm run build && pnpm run tauri build",
+        "build:web": "cd apps/web-client && pnpm run build",
+        "build": "pnpm run build:signaling-exe && pnpm run build:host",
+        "setup": "pnpm install && pnpm run setup:packages",
+        "setup:packages": "cd packages/shared && pnpm install && cd ../../apps/signaling-server && pnpm install && cd ../host && pnpm install && cd ../web-client && pnpm install"
     },
     "workspaces": [
         "apps/*",

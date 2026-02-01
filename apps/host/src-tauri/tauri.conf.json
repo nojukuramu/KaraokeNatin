@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "karaoke-host",
+  "productName": "KaraokeNatin",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.karaokenatin.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173"
@@ -10,11 +10,14 @@
   "app": {
     "windows": [
       {
-        "title": "KaraokeNatin Host",
-        "width": 800,
-        "height": 600,
+        "title": "KaraokeNatin",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {
@@ -23,13 +26,27 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "binaries/yt-dlp",
+      "binaries/signaling-server"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "shortDescription": "Karaoke party app with remote control",
+    "longDescription": "KaraokeNatin is a karaoke party app that lets guests add songs from their phones. Features include YouTube integration, real-time queue management, and a mobile-friendly remote control interface.",
+    "copyright": "Copyright © 2026 KaraokeNatin. MIT License.",
+    "category": "Entertainment",
+    "publisher": "KaraokeNatin"
   }
 }

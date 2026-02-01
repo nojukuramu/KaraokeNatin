@@ -22,11 +22,6 @@ interface YouTubePlayer {
     destroy(): void;
 }
 
-interface PlayerProps {
-    isFullscreen: boolean;
-    onToggleFullscreen: () => void;
-}
-
 // Icons
 const Icons = {
     maximize: (
@@ -51,6 +46,23 @@ const Icons = {
             <circle cx="6" cy="18" r="3"></circle>
             <circle cx="18" cy="16" r="3"></circle>
         </svg>
+    ),
+    play: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+    ),
+    pause: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+        </svg>
+    ),
+    skipForward: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+            <line x1="19" y1="5" x2="19" y2="19"></line>
+        </svg>
     )
 };
 
@@ -61,15 +73,65 @@ const generateScore = (): number => {
     return Math.floor(Math.random() * 31) + 70; // 70-100
 };
 
-const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
+const Player = () => {
     const playerRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
     const ytPlayerRef = useRef<YouTubePlayer | null>(null);
     const { roomState } = useRoomState();
     const [isAPIReady, setIsAPIReady] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
     const currentSongRef = useRef(roomState?.player.currentSong);
     const [showScoring, setShowScoring] = useState(false);
     const [currentScore, setCurrentScore] = useState(0);
     const [lastSongTitle, setLastSongTitle] = useState('');
+    const [showControls, setShowControls] = useState(false);
+
+    // Handle fullscreen change events
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => {
+            document.removeEventListener('fullscreenchange', handleFullscreenChange);
+        };
+    }, []);
+
+    // Custom control handlers
+    const handlePlayPause = useCallback(async () => {
+        const isPlaying = roomState?.player.status === 'playing';
+        try {
+            await invoke('process_command', {
+                command: { type: isPlaying ? 'PAUSE' : 'PLAY' },
+            });
+        } catch (error) {
+            console.error('[Player] Failed to toggle play/pause:', error);
+        }
+    }, [roomState?.player.status]);
+
+    const handleSkip = useCallback(async () => {
+        try {
+            await invoke('process_command', {
+                command: { type: 'SKIP' },
+            });
+        } catch (error) {
+            console.error('[Player] Failed to skip:', error);
+        }
+    }, []);
+
+    // Toggle true browser fullscreen
+    const toggleFullscreen = useCallback(async () => {
+        try {
+            if (!document.fullscreenElement) {
+                await containerRef.current?.requestFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        } catch (error) {
+            console.error('[Player] Fullscreen error:', error);
+        }
+    }, []);
 
     // Load YouTube IFrame API
     useEffect(() => {
@@ -97,9 +159,11 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
             width: '100%',
             playerVars: {
                 autoplay: 0,
-                controls: 1,
+                controls: 0,
                 modestbranding: 1,
                 rel: 0,
+                disablekb: 1,
+                iv_load_policy: 3,
             },
             events: {
                 onReady: handlePlayerReady,
@@ -134,6 +198,12 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
             case window.YT.PlayerState.BUFFERING:
                 status = 'loading';
                 break;
+            case window.YT.PlayerState.CUED:
+                // Video is ready, auto-play it
+                console.log('[Player] Video cued, starting playback');
+                ytPlayerRef.current?.playVideo();
+                status = 'loading';
+                break;
             case window.YT.PlayerState.ENDED:
                 status = 'idle';
                 // Show scoring overlay before skipping
@@ -157,15 +227,21 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
         }
     };
 
-    // Poll current time
+    // Poll current time - throttle broadcasts to reduce network traffic
     const startTimePolling = () => {
+        let lastBroadcastTime = 0;
         setInterval(() => {
             if (ytPlayerRef.current) {
                 try {
                     const currentTime = ytPlayerRef.current.getCurrentTime();
                     const duration = ytPlayerRef.current.getDuration();
                     if (currentTime > 0) {
-                        updatePlayerState(undefined, currentTime, duration);
+                        const now = Date.now();
+                        // Only broadcast time updates every 5 seconds to reduce traffic
+                        if (now - lastBroadcastTime >= 5000) {
+                            lastBroadcastTime = now;
+                            updatePlayerState(undefined, currentTime, duration);
+                        }
                     }
                 } catch (error) {
                     // Player might not be ready yet
@@ -187,7 +263,7 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
     }, [roomState?.player.currentSong?.title]);
 
     // Called when scoring animation completes
-    const handleScoringComplete = async () => {
+    const handleScoringComplete = useCallback(async () => {
         setShowScoring(false);
         try {
             await invoke('process_command', {
@@ -196,7 +272,7 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
         } catch (error) {
             console.error('[Player] Failed to skip song:', error);
         }
-    };
+    }, []);
 
     // Load new song when current song changes
     useEffect(() => {
@@ -207,6 +283,7 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
 
             if (ytPlayerRef.current) {
                 console.log('[Player] Loading video:', currentSong.youtubeId);
+                // loadVideoById auto-plays by default in YouTube API
                 ytPlayerRef.current.loadVideoById(currentSong.youtubeId);
             }
         } else if (!currentSong && currentSongRef.current) {
@@ -233,9 +310,14 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
     }, [roomState?.player.status]);
 
     const currentSong = roomState?.player.currentSong;
+    const isPlaying = roomState?.player.status === 'playing';
 
     const playerContent = (
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div
+            style={{ position: 'relative', width: '100%', height: '100%' }}
+            onMouseEnter={() => setShowControls(true)}
+            onMouseLeave={() => setShowControls(false)}
+        >
             {!isAPIReady ? (
                 <div className="player-idle">
                     <div className="spinner" style={{ width: 40, height: 40 }}></div>
@@ -244,15 +326,15 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
             ) : (
                 <>
                     {/* Always render player div at full size */}
-                    <div 
-                        ref={playerRef} 
-                        style={{ 
-                            width: '100%', 
+                    <div
+                        ref={playerRef}
+                        style={{
+                            width: '100%',
                             height: '100%',
                             position: 'absolute',
                             top: 0,
                             left: 0
-                        }} 
+                        }}
                     />
                     {/* Overlay idle message on top when no song */}
                     {!currentSong && (
@@ -272,53 +354,64 @@ const Player = ({ isFullscreen, onToggleFullscreen }: PlayerProps) => {
                             </p>
                         </div>
                     )}
+                    {/* Custom controls overlay */}
+                    {currentSong && (
+                        <div className={`player-controls-overlay ${showControls ? 'visible' : ''}`}>
+                            <div className="player-controls-bar">
+                                <button
+                                    className="player-control-btn player-control-btn-primary"
+                                    onClick={handlePlayPause}
+                                    title={isPlaying ? 'Pause' : 'Play'}
+                                >
+                                    {isPlaying ? Icons.pause : Icons.play}
+                                </button>
+                                <button
+                                    className="player-control-btn"
+                                    onClick={handleSkip}
+                                    title="Skip"
+                                >
+                                    {Icons.skipForward}
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
         </div>
     );
 
-    // Fullscreen mode
-    if (isFullscreen) {
-        return (
-            <>
-                <div className="fullscreen-overlay">
-                    <div className="fullscreen-player">
-                        {playerContent}
-                    </div>
-                    <div className="fullscreen-controls">
-                        <button className="btn-icon" onClick={onToggleFullscreen}>
-                            {Icons.minimize}
-                        </button>
-                    </div>
-                </div>
-
-                {showScoring && (
-                    <ScoringOverlay
-                        score={currentScore}
-                        onComplete={handleScoringComplete}
-                        songTitle={lastSongTitle}
-                    />
-                )}
-            </>
-        );
-    }
-
-    // Normal mode
+    // Single render - container handles fullscreen
     return (
-        <div className="player-container">
+        <div
+            ref={containerRef}
+            className="player-container"
+            style={isFullscreen ? {
+                width: '100vw',
+                height: '100vh',
+                background: '#000',
+                display: 'flex',
+                flexDirection: 'column'
+            } : undefined}
+        >
             <button
                 className="btn-icon btn-fullscreen"
-                onClick={onToggleFullscreen}
-                title="Enter fullscreen"
+                onClick={toggleFullscreen}
+                title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                style={isFullscreen ? {
+                    position: 'absolute',
+                    top: 16,
+                    right: 16,
+                    zIndex: 100
+                } : undefined}
             >
-                {Icons.maximize}
+                {isFullscreen ? Icons.minimize : Icons.maximize}
             </button>
 
-            <div className="player-inner">
+            <div className="player-inner" style={isFullscreen ? { flex: 1 } : undefined}>
                 {playerContent}
             </div>
 
-            {currentSong && (
+            {currentSong && !isFullscreen && (
                 <div style={{
                     padding: '16px 20px',
                     background: 'var(--bg-secondary)',

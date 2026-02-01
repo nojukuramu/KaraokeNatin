@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use parking_lot::RwLock;
+use tokio::process::Command;
 
 /// Search result from YouTube
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,6 +14,19 @@ pub struct SearchResult {
     pub thumbnail: String,
     pub url: String,
 }
+
+/// Cache entry with timestamp for potential TTL
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    results: Vec<SearchResult>,
+    #[allow(dead_code)]
+    cached_at: std::time::Instant,
+}
+
+/// Thread-safe in-memory cache for search results
+static SEARCH_CACHE: LazyLock<RwLock<HashMap<String, CacheEntry>>> = LazyLock::new(|| {
+    RwLock::new(HashMap::new())
+});
 
 /// Get the path to the bundled yt-dlp executable
 fn get_ytdlp_path() -> String {
@@ -28,16 +44,29 @@ fn get_ytdlp_path() -> String {
     }
 }
 
-/// Search YouTube for videos matching the query
-pub fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>, String> {
+/// Search YouTube for videos matching the query (async, with caching)
+pub async fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>, String> {
+    // Append "karaoke" to the query to prioritize karaoke-friendly results
+    let karaoke_query = format!("{} karaoke", query);
+    let cache_key = format!("{}:{}", karaoke_query.to_lowercase(), limit);
+    
+    // Check cache first
+    {
+        let cache = SEARCH_CACHE.read();
+        if let Some(entry) = cache.get(&cache_key) {
+            log::info!("[YouTube] Cache hit for: {}", karaoke_query);
+            return Ok(entry.results.clone());
+        }
+    }
+    
+    log::info!("[YouTube] Cache miss, searching for: {}", karaoke_query);
+    
     let ytdlp_path = get_ytdlp_path();
     
     // Build search query (ytsearch:N searches for N results)
-    let search_query = format!("ytsearch{}:{}", limit, query);
+    let search_query = format!("ytsearch{}:{}", limit, karaoke_query);
     
-    log::info!("[YouTube] Searching for: {}", query);
-    
-    // Run yt-dlp with JSON output
+    // Run yt-dlp with JSON output using tokio for async execution
     let output = Command::new(&ytdlp_path)
         .args([
             &search_query,
@@ -48,6 +77,7 @@ pub fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>, Stri
             "--ignore-errors",
         ])
         .output()
+        .await
         .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
     
     if !output.status.success() {
@@ -110,7 +140,17 @@ pub fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>, Stri
         }
     }
     
-    log::info!("[YouTube] Found {} results", results.len());
+    log::info!("[YouTube] Found {} results, caching...", results.len());
+    
+    // Store in cache
+    {
+        let mut cache = SEARCH_CACHE.write();
+        cache.insert(cache_key, CacheEntry {
+            results: results.clone(),
+            cached_at: std::time::Instant::now(),
+        });
+    }
+    
     Ok(results)
 }
 

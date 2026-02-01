@@ -17,8 +17,14 @@ export type ClientCommand =
     | { type: 'ADD_SONG'; youtubeUrl: string }
     | { type: 'REMOVE_SONG'; songId: string }
     | { type: 'REORDER_QUEUE'; songId: string; newIndex: number }
+    | { type: 'MOVE_SONG_UP'; songId: string }
+    | { type: 'MOVE_SONG_DOWN'; songId: string }
     | { type: 'SET_DISPLAY_NAME'; name: string }
-    | { type: 'PING' };
+    | { type: 'PING' }
+    // Playlist management commands
+    | { type: 'PLAYLIST_ADD'; youtubeUrl: string }
+    | { type: 'PLAYLIST_REMOVE'; songId: string }
+    | { type: 'PLAYLIST_TO_QUEUE'; songId: string };
 
 /**
  * Broadcasts sent from Host -> Clients
@@ -38,7 +44,9 @@ export function isClientCommand(data: unknown): data is ClientCommand {
     }
     const validTypes = [
         'PLAY', 'PAUSE', 'SKIP', 'SEEK', 'SET_VOLUME', 'TOGGLE_MUTE',
-        'ADD_SONG', 'REMOVE_SONG', 'REORDER_QUEUE', 'SET_DISPLAY_NAME', 'PING'
+        'ADD_SONG', 'REMOVE_SONG', 'REORDER_QUEUE', 'MOVE_SONG_UP', 'MOVE_SONG_DOWN',
+        'SET_DISPLAY_NAME', 'PING',
+        'PLAYLIST_ADD', 'PLAYLIST_REMOVE', 'PLAYLIST_TO_QUEUE'
     ];
     return validTypes.includes((data as any).type);
 }

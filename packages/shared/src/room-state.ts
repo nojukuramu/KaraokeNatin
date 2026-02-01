@@ -43,6 +43,9 @@ export interface RoomState {
     // Queue state
     queue: Song[];
 
+    // Playlist state (shared song list independent of queue)
+    playlist: Song[];
+
     // Metadata
     createdAt: number;
     updatedAt: number;
@@ -66,6 +69,7 @@ export function createInitialRoomState(roomId: string, hostPeerId: string): Room
             isMuted: false,
         },
         queue: [],
+        playlist: [],
         createdAt: now,
         updatedAt: now,
     };

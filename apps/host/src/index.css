@@ -77,11 +77,14 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: transform 0.3s ease;
+  transition: width 0.3s ease, margin-right 0.3s ease;
+  flex-shrink: 0;
 }
 
 .control-panel.collapsed {
-  transform: translateX(100%);
+  width: 0;
+  border-left: none;
+  overflow: hidden;
 }
 
 .control-panel-header {
@@ -428,8 +431,7 @@ body {
 
 /* Toggle Button for Panel */
 .panel-toggle {
-  position: absolute;
-  right: 16px;
+  position: fixed;
   top: 50%;
   transform: translateY(-50%);
   width: 32px;
@@ -442,7 +444,7 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
 }
 
 .panel-toggle:hover {
@@ -482,4 +484,185 @@ body {
     top: 0;
     z-index: 500;
   }
+}
+
+/* ========== Custom Player Controls ========== */
+.player-controls-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  opacity: 0.7;
+  transition: opacity 0.3s ease;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.player-controls-overlay:hover,
+.player-controls-overlay.visible {
+  opacity: 1;
+}
+
+.player-controls-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.player-control-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.player-control-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.player-control-btn-primary {
+  width: 72px;
+  height: 72px;
+  background: var(--accent);
+}
+
+.player-control-btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+/* ========== Compact Queue Styles ========== */
+.queue-display {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.queue-header {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.queue-empty {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-secondary);
+}
+
+.queue-empty-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.queue-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.queue-item-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.queue-item-compact:last-child {
+  border-bottom: none;
+}
+
+.queue-item-compact:hover {
+  background: var(--bg-tertiary);
+}
+
+.queue-thumb-compact {
+  width: 48px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.queue-info-compact {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-title-compact {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-meta-compact {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.queue-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.queue-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.queue-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.queue-action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.queue-action-btn-danger:hover:not(:disabled) {
+  background: rgba(224, 36, 94, 0.15);
+  color: var(--danger);
 }

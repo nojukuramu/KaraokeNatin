@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { io, Socket } from 'socket.io-client';
 import { listen } from '@tauri-apps/api/event';
-import { ClientCommand, HostBroadcast, isClientCommand, RoomState } from '@karaokenatin/shared';
+import { HostBroadcast, isClientCommand, RoomState } from '@karaokenatin/shared';
 import { processCommand, getRoomState } from '../lib/commands';
 import { hashToken } from '../lib/security';
 

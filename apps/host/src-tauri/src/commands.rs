@@ -48,6 +48,21 @@ pub enum ClientCommand {
     },
     SET_DISPLAY_NAME { name: String },
     PING,
+    // Playlist commands
+    PLAYLIST_ADD {
+        #[serde(rename = "youtubeUrl")]
+        youtube_url: String,
+        #[serde(rename = "addedBy")]
+        added_by: Option<String>,
+    },
+    PLAYLIST_REMOVE {
+        #[serde(rename = "songId")]
+        song_id: String,
+    },
+    PLAYLIST_TO_QUEUE {
+        #[serde(rename = "songId")]
+        song_id: String,
+    },
 }
 
 /// Create a new room
@@ -79,9 +94,9 @@ pub fn get_room_state(state: tauri::State<RoomStateManager>) -> Result<crate::ro
 
 /// Search YouTube for videos
 #[tauri::command]
-pub fn search_youtube(query: String, limit: Option<u32>) -> Result<Vec<crate::youtube::SearchResult>, String> {
+pub async fn search_youtube(query: String, limit: Option<u32>) -> Result<Vec<crate::youtube::SearchResult>, String> {
     let search_limit = limit.unwrap_or(10);
-    crate::youtube::search_youtube(&query, search_limit)
+    crate::youtube::search_youtube(&query, search_limit).await
 }
 
 /// Process a client command
@@ -166,6 +181,42 @@ pub async fn process_command(
         }
         ClientCommand::PING => {
             // Respond to ping - handled at protocol level
+        }
+        ClientCommand::PLAYLIST_ADD { youtube_url, added_by } => {
+            // Extract YouTube ID from URL
+            let youtube_id = extract_youtube_id(&youtube_url)
+                .ok_or_else(|| "Invalid YouTube URL".to_string())?;
+            
+            // Fetch metadata using yt-dlp
+            match crate::sidecar::fetch_metadata(&youtube_id).await {
+                Ok(metadata) => {
+                    let song = Song {
+                        id: Uuid::new_v4().to_string(),
+                        youtube_id: youtube_id.clone(),
+                        title: metadata.title,
+                        artist: metadata.artist,
+                        duration: metadata.duration,
+                        thumbnail_url: metadata.thumbnail_url,
+                        added_by: added_by.unwrap_or_else(|| "Guest".to_string()),
+                        added_at: chrono::Utc::now().timestamp_millis(),
+                    };
+                    state.write().add_to_playlist(song);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch metadata: {}", e);
+                    return Err(format!("Failed to fetch song metadata: {}", e));
+                }
+            }
+        }
+        ClientCommand::PLAYLIST_REMOVE { song_id } => {
+            if !state.write().remove_from_playlist(&song_id) {
+                return Err("Song not found in playlist".to_string());
+            }
+        }
+        ClientCommand::PLAYLIST_TO_QUEUE { song_id } => {
+            if !state.write().playlist_to_queue(&song_id) {
+                return Err("Song not found in playlist".to_string());
+            }
         }
     }
     

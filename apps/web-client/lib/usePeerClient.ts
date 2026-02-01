@@ -1,17 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { io, Socket } from 'socket.io-client';
 import { ClientCommand, HostBroadcast, isHostBroadcast } from '@karaokenatin/shared';
-import { useRoomStore } from './useRoomState';
+import { useRoomStore, useCommandStore } from './useRoomState';
 
 const SIGNALING_SERVER_URL = 'http://localhost:3001';
 
 export function usePeerClient(roomId: string, joinToken: string) {
     const [peer, setPeer] = useState<Peer | null>(null);
-    const [connection, setConnection] = useState<DataConnection | null>(null);
+    const connectionRef = useRef<DataConnection | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [socket, setSocket] = useState<Socket | null>(null);
     const updateState = useRoomStore((state) => state.setState);
+    const getIsInputFocused = () => useRoomStore.getState().isInputFocused;
+    const setSendCommand = useCommandStore((state) => state.setSendCommand);
+
+    // Stable sendCommand function using ref
+    const sendCommand = useCallback((command: ClientCommand) => {
+        if (connectionRef.current && connectionRef.current.open) {
+            connectionRef.current.send(command);
+            console.log('[PeerClient] Sent command:', command);
+        } else {
+            console.warn('[PeerClient] Cannot send command, not connected');
+        }
+    }, []);
+
+    // Register sendCommand in store once
+    useEffect(() => {
+        setSendCommand(sendCommand);
+    }, [sendCommand, setSendCommand]);
 
     const connect = (displayName: string) => {
         // Initialize PeerJS
@@ -38,7 +55,7 @@ export function usePeerClient(roomId: string, joinToken: string) {
                 // Establish P2P connection to host
                 const conn = peerInstance.connect(hostPeerId);
                 setupDataChannelHandlers(conn);
-                setConnection(conn);
+                connectionRef.current = conn;
             });
 
             socketInstance.on('JOIN_REJECTED', ({ reason }) => {
@@ -68,7 +85,10 @@ export function usePeerClient(roomId: string, joinToken: string) {
                 console.log('[PeerClient] Received broadcast:', data);
 
                 if (data.type === 'STATE_UPDATE') {
-                    updateState(data.state);
+                    // Skip state updates while user is typing to prevent input disruption
+                    if (!getIsInputFocused()) {
+                        updateState(data.state);
+                    }
                 } else if (data.type === 'ERROR') {
                     console.error('[PeerClient] Error from host:', data.message);
                     alert(`Error: ${data.message}`);
@@ -84,15 +104,6 @@ export function usePeerClient(roomId: string, joinToken: string) {
         conn.on('error', (error) => {
             console.error('[PeerClient] Connection error:', error);
         });
-    };
-
-    const sendCommand = (command: ClientCommand) => {
-        if (connection && connection.open) {
-            connection.send(command);
-            console.log('[PeerClient] Sent command:', command);
-        } else {
-            console.warn('[PeerClient] Cannot send command, not connected');
-        }
     };
 
     useEffect(() => {

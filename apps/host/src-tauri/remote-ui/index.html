@@ -431,10 +431,18 @@
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 4px;
             transition: all 0.2s;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        .btn-sm svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
         }
 
         .btn-primary {
@@ -444,6 +452,30 @@
 
         .btn-primary:hover {
             background: var(--accent-hover);
+        }
+
+        .btn-primary.added {
+            background: var(--success);
+            pointer-events: none;
+        }
+
+        .btn-sm.loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        .btn-sm:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-spinner {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
 
         .btn-secondary {
@@ -467,6 +499,7 @@
             padding: 12px;
             border-radius: 12px;
             transition: background 0.2s;
+            flex-wrap: wrap;
         }
 
         .queue-item:hover {
@@ -497,15 +530,16 @@
 
         .queue-info {
             flex: 1;
-            min-width: 0;
+            min-width: 120px;
         }
 
         .queue-title {
             font-size: 14px;
             font-weight: 500;
-            white-space: nowrap;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
-            text-overflow: ellipsis;
         }
 
         .queue-meta {
@@ -515,7 +549,125 @@
 
         .queue-actions {
             display: flex;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        /* Mini queue items for Playing tab */
+        .queue-list-compact {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .queue-item-mini {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .queue-item-mini:last-child {
+            border-bottom: none;
+        }
+
+        .queue-thumb-mini {
+            width: 48px;
+            height: 36px;
+            border-radius: 4px;
+            object-fit: cover;
+            background: var(--bg-tertiary);
+            flex-shrink: 0;
+        }
+
+        .queue-info-mini {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .queue-info-mini .queue-title {
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .queue-info-mini .queue-meta {
+            font-size: 11px;
+        }
+
+        /* Mini queue action buttons */
+        .queue-actions-mini {
+            display: flex;
             gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .queue-actions-mini.loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .queue-action-btn-mini {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            border: none;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            padding: 0;
+        }
+
+        .queue-action-btn-mini:hover:not(:disabled) {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .queue-action-btn-mini:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .queue-action-btn-mini.delete:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .queue-action-btn-mini.loading {
+            pointer-events: none;
+        }
+
+        .queue-action-btn-mini svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .queue-item-mini.removing {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        /* Mobile: compact queue actions */
+        @media (max-width: 480px) {
+            .queue-item {
+                gap: 8px;
+            }
+            .queue-thumb {
+                width: 48px;
+                height: 36px;
+            }
+            .queue-actions {
+                width: 100%;
+                justify-content: flex-end;
+                margin-top: 8px;
+                padding-left: 36px;
+            }
         }
 
         .queue-action-btn {
@@ -537,8 +689,27 @@
             color: var(--text-primary);
         }
 
+        .queue-action-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .queue-action-btn.loading {
+            opacity: 0.7;
+        }
+
         .queue-action-btn.delete:hover {
             color: var(--danger);
+        }
+
+        .queue-actions.actions-loading {
+            opacity: 0.6;
+        }
+
+        .queue-item.removing {
+            opacity: 0.5;
+            transform: translateX(10px);
+            transition: all 0.3s;
         }
 
         /* Join Screen */
@@ -780,17 +951,21 @@
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script>
         // State
         let state = {
             screen: 'join', // 'join', 'loading', 'connected', 'disconnected'
             username: localStorage.getItem('karaoke_username') || '',
-            activeTab: 'playing', // 'playing', 'search', 'queue'
+            activeTab: 'playing', // 'playing', 'search', 'queue', 'playlist'
             roomState: null,
             searchQuery: '',
             searchResults: [],
             searching: false,
-            theme: window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+            isInputFocused: false,
+            theme: window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
+            addedSongs: new Set(), // Track which songs have been added (for "Added!" feedback)
+            loadingActions: new Set() // Track which button actions are currently loading
         };
 
         let socket = null;
@@ -830,6 +1005,7 @@
             volumeX: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>',
             sun: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>',
             moon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>',
+            userPlus: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line></svg>',
             search: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
             plus: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>',
             externalLink: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>',
@@ -840,7 +1016,8 @@
             trash: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>',
             music: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>',
             refreshCw: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>',
-            list: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>'
+            list: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>',
+            spinnerSmall: '<svg class="btn-spinner" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></path></svg>'
         };
 
         function escapeHtml(str) {
@@ -922,19 +1099,23 @@
             const rs = state.roomState || {};
             const currentSong = rs.player?.currentSong;
             const queue = rs.queue || [];
+            const playlist = rs.playlist || [];
             const player = rs.player || {};
-            const isPlaying = player.status === 'PLAYING';
+            const isPlaying = player.status === 'playing';
 
             return `
                 <header class="header">
                     <div class="header-left">
-                        <span class="logo">KN</span>
+                        <span class="logo">KaraokeNatin</span>
                         <div class="connection-status">
                             <span class="status-dot"></span>
                             <span>${state.username}</span>
                         </div>
                     </div>
                     <div class="header-actions">
+                        <button class="icon-btn" onclick="showInviteQR()" title="Invite friends">
+                            ${icons.userPlus}
+                        </button>
                         <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
                             ${state.theme === 'dark' ? icons.sun : icons.moon}
                         </button>
@@ -943,25 +1124,26 @@
 
                 <nav class="nav-tabs">
                     <button class="nav-tab ${state.activeTab === 'playing' ? 'active' : ''}" onclick="setTab('playing')">
-                        Playing
+                        Playing${queue.length > 0 ? ` (${queue.length})` : ''}
                     </button>
                     <button class="nav-tab ${state.activeTab === 'search' ? 'active' : ''}" onclick="setTab('search')">
                         Search
                     </button>
-                    <button class="nav-tab ${state.activeTab === 'queue' ? 'active' : ''}" onclick="setTab('queue')">
-                        Queue (${queue.length})
+                    <button class="nav-tab ${state.activeTab === 'playlist' ? 'active' : ''}" onclick="setTab('playlist')">
+                        Playlist (${playlist.length})
                     </button>
                 </nav>
 
                 <main class="main">
                     ${state.activeTab === 'playing' ? renderPlayingTab(currentSong, player, isPlaying) : ''}
                     ${state.activeTab === 'search' ? renderSearchTab() : ''}
-                    ${state.activeTab === 'queue' ? renderQueueTab(queue) : ''}
+                    ${state.activeTab === 'playlist' ? renderPlaylistTab(playlist) : ''}
                 </main>
             `;
         }
 
         function renderPlayingTab(currentSong, player, isPlaying) {
+            const queue = state.roomState?.queue || [];
             return `
                 <section class="now-playing">
                     ${currentSong ? `
@@ -974,7 +1156,7 @@
                             </div>
                         </div>
                     ` : `
-                        <div class="empty-state">
+                        <div class="empty-state" style="padding: 24px 0;">
                             <div class="empty-state-icon">${icons.music}</div>
                             <p>No song playing</p>
                         </div>
@@ -982,28 +1164,47 @@
                 </section>
 
                 <section class="controls">
-                    <button class="control-btn" onclick="sendCommand({type:'SKIP'})" title="Skip">
-                        ${icons.skipForward}
-                    </button>
-                    <button class="control-btn primary" onclick="sendCommand({type:'${isPlaying ? 'PAUSE' : 'PLAY'}'})" title="${isPlaying ? 'Pause' : 'Play'}">
+                    <button class="control-btn primary" onclick="togglePlayPause()" title="${isPlaying ? 'Pause' : 'Play'}" id="play-pause-btn">
                         ${isPlaying ? icons.pause : icons.play}
                     </button>
-                    <button class="control-btn" onclick="sendCommand({type:'TOGGLE_MUTE'})" title="Toggle mute">
-                        ${player.isMuted ? icons.volumeX : icons.volume2}
+                    <button class="control-btn" onclick="skipSong()" title="Skip">
+                        ${icons.skipForward}
                     </button>
                 </section>
 
-                <section class="volume-control">
-                    <span>${icons.volume2}</span>
-                    <input 
-                        type="range" 
-                        class="volume-slider" 
-                        min="0" 
-                        max="100" 
-                        value="${player.volume || 70}"
-                        onchange="sendCommand({type:'SET_VOLUME', volume: parseInt(this.value)})"
-                    >
-                </section>
+                ${queue.length > 0 ? `
+                    <section class="playing-queue">
+                        <div class="section-label" style="padding: 12px 0 8px; font-size: 13px; font-weight: 600; color: var(--text-secondary);">
+                            Up Next (${queue.length})
+                        </div>
+                        <div class="queue-list-compact">
+                            ${queue.map((song, i) => {
+                                const isAnyMoveLoading = ['up', 'down'].some(d => state.loadingActions.has('move_' + song.id + '_' + d));
+                                const isRemoveLoading = state.loadingActions.has('rmq_' + song.id);
+                                return `
+                                <div class="queue-item-mini${isRemoveLoading ? ' removing' : ''}">
+                                    <div class="queue-number">${i + 1}</div>
+                                    <img class="queue-thumb-mini" src="${song.thumbnailUrl || `https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg`}" alt="">
+                                    <div class="queue-info-mini">
+                                        <div class="queue-title">${escapeHtml(song.title)}</div>
+                                        <div class="queue-meta">${escapeHtml(song.addedBy || 'Guest')}</div>
+                                    </div>
+                                    <div class="queue-actions-mini${isAnyMoveLoading ? ' loading' : ''}">
+                                        <button class="queue-action-btn-mini" onclick="moveQueueItem('${song.id}', 'up')" title="Move up" ${i === 0 || isAnyMoveLoading ? 'disabled' : ''}>
+                                            ${icons.chevronUp}
+                                        </button>
+                                        <button class="queue-action-btn-mini" onclick="moveQueueItem('${song.id}', 'down')" title="Move down" ${i === queue.length - 1 || isAnyMoveLoading ? 'disabled' : ''}>
+                                            ${icons.chevronDown}
+                                        </button>
+                                        <button class="queue-action-btn-mini delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromQueue('${song.id}')" title="Remove" ${isRemoveLoading ? 'disabled' : ''}>
+                                            ${isRemoveLoading ? icons.spinnerSmall : icons.trash}
+                                        </button>
+                                    </div>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    </section>
+                ` : ''}
             `;
         }
 
@@ -1017,6 +1218,9 @@
                             id="search-input"
                             placeholder="Search for songs..." 
                             value="${escapeHtml(state.searchQuery)}"
+                            onfocus="state.isInputFocused = true"
+                            onblur="state.isInputFocused = false"
+                            oninput="state.searchQuery = this.value"
                         >
                         <button type="submit" class="search-btn">
                             Search
@@ -1033,7 +1237,11 @@
 
                 ${!state.searching && state.searchResults.length > 0 ? `
                     <section class="search-results">
-                        ${state.searchResults.map(result => `
+                        ${state.searchResults.map(result => {
+                            const isAdded = state.addedSongs.has(result.url);
+                            const isQueueLoading = state.loadingActions.has('queue_' + result.url);
+                            const isPlaylistLoading = state.loadingActions.has('playlist_' + result.url);
+                            return `
                             <div class="search-result">
                                 <img class="search-result-thumb" src="${result.thumbnail}" alt="">
                                 <div class="search-result-info">
@@ -1044,16 +1252,25 @@
                                         <span>${result.duration}</span>
                                     </div>
                                     <div class="search-result-actions">
-                                        <button class="btn-sm btn-primary" onclick="addFromSearch('${escapeHtml(result.url)}')">
-                                            ${icons.plus} Add
-                                        </button>
+                                        ${isAdded ? `
+                                            <button class="btn-sm btn-primary added" disabled>
+                                                ✓ Added!
+                                            </button>
+                                        ` : `
+                                            <button class="btn-sm btn-primary${isQueueLoading ? ' loading' : ''}" onclick="addFromSearch('${escapeHtml(result.url)}')" ${isQueueLoading ? 'disabled' : ''}>
+                                                ${isQueueLoading ? icons.spinnerSmall : icons.plus} Queue
+                                            </button>
+                                            <button class="btn-sm btn-secondary${isPlaylistLoading ? ' loading' : ''}" onclick="addToPlaylist('${escapeHtml(result.url)}')" ${isPlaylistLoading ? 'disabled' : ''}>
+                                                ${isPlaylistLoading ? icons.spinnerSmall : icons.plus} Playlist
+                                            </button>
+                                        `}
                                         <button class="btn-sm btn-secondary" onclick="openInYouTube('${escapeHtml(result.url)}')">
-                                            ${icons.externalLink} YouTube
+                                            ${icons.externalLink}
                                         </button>
                                     </div>
                                 </div>
-                            </div>
-                        `).join('')}
+                            </div>`
+                        }).join('')}
                     </section>
                 ` : ''}
 
@@ -1078,33 +1295,68 @@
 
             return `
                 <section class="queue-list">
-                    ${queue.map((song, i) => `
-                        <div class="queue-item">
+                    ${queue.map((song, i) => {
+                        const isAnyMoveLoading = ['up', 'down'].some(d => state.loadingActions.has('move_' + song.id + '_' + d));
+                        const isRemoveLoading = state.loadingActions.has('rmq_' + song.id);
+                        return `
+                        <div class="queue-item${isRemoveLoading ? ' removing' : ''}">
                             <div class="queue-number">${i + 1}</div>
                             <img class="queue-thumb" src="${song.thumbnailUrl || `https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg`}" alt="">
                             <div class="queue-info">
                                 <div class="queue-title">${escapeHtml(song.title)}</div>
                                 <div class="queue-meta">${escapeHtml(song.addedBy || 'Guest')}</div>
                             </div>
-                            <div class="queue-actions">
-                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'top')" title="Move to top">
-                                    ${icons.chevronsUp}
-                                </button>
-                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'up')" title="Move up">
+                            <div class="queue-actions${isAnyMoveLoading ? ' actions-loading' : ''}">
+                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'up')" title="Move up" ${isAnyMoveLoading ? 'disabled' : ''}>
                                     ${icons.chevronUp}
                                 </button>
-                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'down')" title="Move down">
+                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'down')" title="Move down" ${isAnyMoveLoading ? 'disabled' : ''}>
                                     ${icons.chevronDown}
                                 </button>
-                                <button class="queue-action-btn" onclick="moveQueueItem('${song.id}', 'bottom')" title="Move to bottom">
-                                    ${icons.chevronsDown}
-                                </button>
-                                <button class="queue-action-btn delete" onclick="removeFromQueue('${song.id}')" title="Remove">
-                                    ${icons.trash}
+                                <button class="queue-action-btn delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromQueue('${song.id}')" title="Remove" ${isRemoveLoading ? 'disabled' : ''}>
+                                    ${isRemoveLoading ? icons.spinnerSmall : icons.trash}
                                 </button>
                             </div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
+                </section>
+            `;
+        }
+
+        function renderPlaylistTab(playlist) {
+            if (playlist.length === 0) {
+                return `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">${icons.music}</div>
+                        <p>Playlist is empty</p>
+                        <p style="font-size: 13px; margin-top: 8px;">Add songs to your playlist from search results</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <section class="queue-list">
+                    ${playlist.map((song, i) => {
+                        const isP2QLoading = state.loadingActions.has('p2q_' + song.id);
+                        const isRemoveLoading = state.loadingActions.has('rmpl_' + song.id);
+                        return `
+                        <div class="queue-item${isRemoveLoading ? ' removing' : ''}">
+                            <div class="queue-number">${i + 1}</div>
+                            <img class="queue-thumb" src="${song.thumbnailUrl || `https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg`}" alt="">
+                            <div class="queue-info">
+                                <div class="queue-title">${escapeHtml(song.title)}</div>
+                                <div class="queue-meta">${escapeHtml(song.artist || 'Unknown Artist')}</div>
+                            </div>
+                            <div class="queue-actions">
+                                <button class="btn-sm btn-primary${isP2QLoading ? ' loading' : ''}" onclick="playlistToQueue('${song.id}')" title="Add to queue" ${isP2QLoading ? 'disabled' : ''}>
+                                    ${isP2QLoading ? icons.spinnerSmall : icons.plus} Queue
+                                </button>
+                                <button class="queue-action-btn delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromPlaylist('${song.id}')" title="Remove from playlist" ${isRemoveLoading ? 'disabled' : ''}>
+                                    ${isRemoveLoading ? icons.spinnerSmall : icons.trash}
+                                </button>
+                            </div>
+                        </div>
+                    `}).join('')}
                 </section>
             `;
         }
@@ -1136,14 +1388,44 @@
                 state.searchQuery = query;
                 state.searching = true;
                 state.searchResults = [];
+                state.addedSongs.clear(); // Clear added songs when doing a new search
                 render();
                 sendCommand({ type: 'SEARCH', query: query, limit: 8 });
             }
         }
 
         function addFromSearch(url) {
+            const actionKey = `queue_${url}`;
+            if (state.loadingActions.has(actionKey)) return; // Prevent double-click
+            state.loadingActions.add(actionKey);
+            render();
             sendCommand({ type: 'ADD_SONG', youtubeUrl: url, addedBy: state.username });
-            showToast('Song added to queue');
+            // Loading state will be cleared on STATE_UPDATE
+        }
+
+        function addToPlaylist(url) {
+            const actionKey = `playlist_${url}`;
+            if (state.loadingActions.has(actionKey)) return; // Prevent double-click
+            state.loadingActions.add(actionKey);
+            render();
+            sendCommand({ type: 'PLAYLIST_ADD', youtubeUrl: url, addedBy: state.username });
+            // Loading state will be cleared on STATE_UPDATE
+        }
+
+        function playlistToQueue(songId) {
+            const actionKey = `p2q_${songId}`;
+            if (state.loadingActions.has(actionKey)) return;
+            state.loadingActions.add(actionKey);
+            render();
+            sendCommand({ type: 'PLAYLIST_TO_QUEUE', songId: songId });
+        }
+
+        function removeFromPlaylist(songId) {
+            const actionKey = `rmpl_${songId}`;
+            if (state.loadingActions.has(actionKey)) return;
+            state.loadingActions.add(actionKey);
+            render();
+            sendCommand({ type: 'PLAYLIST_REMOVE', songId: songId });
         }
 
         function openInYouTube(url) {
@@ -1153,18 +1435,76 @@
         }
 
         function moveQueueItem(songId, direction) {
+            const actionKey = `move_${songId}_${direction}`;
+            if (state.loadingActions.has(actionKey)) return;
+            state.loadingActions.add(actionKey);
+            render();
             const commandMap = {
                 'up': 'MOVE_SONG_UP',
-                'down': 'MOVE_SONG_DOWN',
-                'top': 'MOVE_SONG_TO_TOP',
-                'bottom': 'MOVE_SONG_TO_BOTTOM'
+                'down': 'MOVE_SONG_DOWN'
             };
             sendCommand({ type: commandMap[direction], songId });
         }
 
         function removeFromQueue(songId) {
+            const actionKey = `rmq_${songId}`;
+            if (state.loadingActions.has(actionKey)) return;
+            state.loadingActions.add(actionKey);
+            render();
             sendCommand({ type: 'REMOVE_SONG', songId });
-            showToast('Song removed');
+        }
+
+        function togglePlayPause() {
+            if (!state.roomState) return;
+            const isPlaying = state.roomState.player.status === 'playing';
+            // Optimistically update local state immediately
+            state.roomState.player.status = isPlaying ? 'paused' : 'playing';
+            render();
+            sendCommand({ type: isPlaying ? 'PAUSE' : 'PLAY' });
+        }
+
+        function skipSong() {
+            sendCommand({ type: 'SKIP' });
+        }
+
+        function showInviteQR() {
+            // Get the current URL (the remote UI URL) which others can use to join
+            const inviteUrl = window.location.href;
+            showModal('Invite Friends', `
+                <div style="text-align: center;">
+                    <p style="margin-bottom: 16px; color: var(--text-secondary);">Share this link or scan the QR code:</p>
+                    <div id="invite-qr" style="background: white; padding: 16px; border-radius: 12px; display: inline-block; margin-bottom: 16px;"></div>
+                    <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; word-break: break-all; font-size: 12px; color: var(--text-primary);">
+                        ${inviteUrl}
+                    </div>
+                    <button onclick="copyInviteLink()" style="margin-top: 12px; padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: 600;">
+                        Copy Link
+                    </button>
+                </div>
+            `, null);
+            // Generate QR code after modal is shown
+            setTimeout(() => {
+                const qrContainer = document.getElementById('invite-qr');
+                if (qrContainer && window.QRCode) {
+                    new QRCode(qrContainer, {
+                        text: inviteUrl,
+                        width: 150,
+                        height: 150,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff'
+                    });
+                } else if (qrContainer) {
+                    qrContainer.innerHTML = '<p style="color: #666; padding: 20px;">QR Code</p>';
+                }
+            }, 100);
+        }
+
+        function copyInviteLink() {
+            navigator.clipboard.writeText(window.location.href).then(() => {
+                showToast('Link copied!');
+            }).catch(() => {
+                showToast('Failed to copy');
+            });
         }
 
         function sendCommand(cmd) {
@@ -1184,15 +1524,27 @@
             setTimeout(() => toast.classList.remove('show'), 2500);
         }
 
-        function showModal(title, text, onConfirm) {
+        function showModal(title, content, onConfirm) {
             $('#modal-title').textContent = title;
-            $('#modal-text').textContent = text;
+            // Support HTML content
+            if (content && content.includes('<')) {
+                $('#modal-text').innerHTML = content;
+            } else {
+                $('#modal-text').textContent = content || '';
+            }
             $('#modal').classList.add('show');
             modalCallback = onConfirm;
-            $('#modal-confirm').onclick = () => {
-                closeModal();
-                if (modalCallback) modalCallback();
-            };
+            // Hide confirm button if no callback
+            const confirmBtn = $('#modal-confirm');
+            if (onConfirm) {
+                confirmBtn.style.display = '';
+                confirmBtn.onclick = () => {
+                    closeModal();
+                    if (modalCallback) modalCallback();
+                };
+            } else {
+                confirmBtn.style.display = 'none';
+            }
         }
 
         function closeModal() {
@@ -1267,8 +1619,48 @@
                 dataConn.on('data', (data) => {
                     console.log('[Remote] Received:', data);
                     if (data.type === 'STATE_UPDATE') {
-                        state.roomState = data.state;
-                        render();
+                        // Check for successful actions by comparing old and new state
+                        const oldState = state.roomState;
+                        const newState = data.state;
+                        
+                        // Clear all loading actions on state update and show success toasts
+                        if (state.loadingActions.size > 0) {
+                            // Check what changed to show appropriate toast
+                            if (oldState && newState) {
+                                const oldQueueLen = oldState.queue?.length || 0;
+                                const newQueueLen = newState.queue?.length || 0;
+                                const oldPlaylistLen = oldState.playlist?.length || 0;
+                                const newPlaylistLen = newState.playlist?.length || 0;
+                                
+                                if (newQueueLen > oldQueueLen) {
+                                    showToast('Song added to queue');
+                                } else if (newQueueLen < oldQueueLen) {
+                                    showToast('Song removed from queue');
+                                } else if (newPlaylistLen > oldPlaylistLen) {
+                                    showToast('Song added to playlist');
+                                } else if (newPlaylistLen < oldPlaylistLen) {
+                                    showToast('Removed from playlist');
+                                } else if (state.loadingActions.size > 0) {
+                                    // Queue reordering or other action
+                                    showToast('Done!');
+                                }
+                            }
+                            
+                            // Mark successfully added songs and clear loading
+                            state.loadingActions.forEach(key => {
+                                if (key.startsWith('queue_') || key.startsWith('playlist_')) {
+                                    const url = key.replace(/^(queue_|playlist_)/, '');
+                                    state.addedSongs.add(url);
+                                }
+                            });
+                            state.loadingActions.clear();
+                        }
+                        
+                        state.roomState = newState;
+                        // Skip render if user is typing to prevent input disruption
+                        if (!state.isInputFocused) {
+                            render();
+                        }
                     } else if (data.type === 'SEARCH_RESULTS') {
                         state.searching = false;
                         state.searchResults = data.results || [];

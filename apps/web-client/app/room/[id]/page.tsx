@@ -1,13 +1,16 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePeerClient } from '@/lib/usePeerClient';
-import { useRoomState } from '@/lib/useRoomState';
+import { usePlayerState, useCurrentSong, useQueue, usePlaylist } from '@/lib/useRoomState';
 import Controls from '@/components/Controls';
 import NowPlaying from '@/components/NowPlaying';
 import QueueDisplay from '@/components/QueueDisplay';
 import AddSong from '@/components/AddSong';
+import Playlist from '@/components/Playlist';
+
+const DISPLAY_NAME_KEY = 'karaokenatin_display_name';
 
 export default function RoomPage() {
     const params = useParams();
@@ -16,13 +19,26 @@ export default function RoomPage() {
     const joinToken = searchParams.get('t') || '';
 
     const { connect, isConnected, sendCommand } = usePeerClient(roomId, joinToken);
-    const { roomState } = useRoomState();
+    const playerState = usePlayerState();
+    const currentSong = useCurrentSong();
+    const queue = useQueue();
+    const playlist = usePlaylist();
     const [displayName, setDisplayName] = useState('');
     const [hasJoined, setHasJoined] = useState(false);
+
+    // Load saved display name on mount
+    useEffect(() => {
+        const savedName = localStorage.getItem(DISPLAY_NAME_KEY);
+        if (savedName) {
+            setDisplayName(savedName);
+        }
+    }, []);
 
     const handleJoin = (e: React.FormEvent) => {
         e.preventDefault();
         if (displayName.trim()) {
+            // Save display name to localStorage
+            localStorage.setItem(DISPLAY_NAME_KEY, displayName.trim());
             connect(displayName);
             setHasJoined(true);
         }
@@ -72,17 +88,19 @@ export default function RoomPage() {
                             <span className="text-sm text-white/80">Connected</span>
                         </div>
                     </div>
-                    <NowPlaying song={roomState?.player.currentSong} />
+                    <NowPlaying song={currentSong} />
                 </div>
 
                 <Controls
-                    playerState={roomState?.player}
+                    playerState={playerState}
                     onCommand={(cmd) => sendCommand(cmd)}
                 />
 
-                <AddSong onCommand={(cmd) => sendCommand(cmd)} />
+                <AddSong />
 
-                <QueueDisplay songs={roomState?.queue || []} />
+                <QueueDisplay songs={queue} />
+
+                <Playlist songs={playlist} />
             </div>
         </div>
     );

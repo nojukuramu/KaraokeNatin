@@ -9,26 +9,50 @@ pub struct SongMetadata {
     pub thumbnail_url: String,
 }
 
+/// Get the path to the bundled yt-dlp executable
+fn get_ytdlp_path() -> String {
+    // In development, use the binaries folder
+    #[cfg(debug_assertions)]
+    {
+        "binaries/yt-dlp-x86_64-pc-windows-msvc.exe".to_string()
+    }
+    
+    // In production, yt-dlp will be bundled alongside the exe
+    // Tauri strips the target triple, so it's just "yt-dlp.exe"
+    #[cfg(not(debug_assertions))]
+    {
+        use std::env;
+        
+        let exe_dir = env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_default();
+        
+        exe_dir.join("yt-dlp.exe").to_string_lossy().to_string()
+    }
+}
+
 /// Fetch song metadata using yt-dlp sidecar
 pub async fn fetch_metadata(youtube_id: &str) -> Result<SongMetadata, String> {
     let url = format!("https://www.youtube.com/watch?v={}", youtube_id);
+    let ytdlp_path = get_ytdlp_path();
     
-    log::info!("Fetching metadata for: {}", youtube_id);
+    log::info!("Fetching metadata for: {} using {}", youtube_id, ytdlp_path);
     
-    // Try to execute yt-dlp binary
-    // The binary should be in src-tauri/binaries/yt-dlp-{target}.exe
-    let output = std::process::Command::new("yt-dlp")
+    // Try to execute yt-dlp binary using tokio for async
+    let output = tokio::process::Command::new(&ytdlp_path)
         .arg("--dump-json")
         .arg("--no-playlist")
         .arg("--skip-download")
         .arg(&url)
-        .output();
+        .output()
+        .await;
     
     match output {
         Ok(output) => {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                parse_ytdlp_output(&stdout)
+                parse_ytdlp_output(&stdout, youtube_id)
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 log::error!("yt-dlp error: {}", stderr);
@@ -43,7 +67,7 @@ pub async fn fetch_metadata(youtube_id: &str) -> Result<SongMetadata, String> {
             }
         }
         Err(e) => {
-            log::warn!("yt-dlp not available: {}. Using fallback metadata.", e);
+            log::warn!("yt-dlp not available at {}: {}. Using fallback metadata.", ytdlp_path, e);
             
             // Fallback metadata
             Ok(SongMetadata {
@@ -57,7 +81,7 @@ pub async fn fetch_metadata(youtube_id: &str) -> Result<SongMetadata, String> {
 }
 
 /// Parse yt-dlp JSON output
-fn parse_ytdlp_output(json_str: &str) -> Result<SongMetadata, String> {
+fn parse_ytdlp_output(json_str: &str, youtube_id: &str) -> Result<SongMetadata, String> {
     #[derive(Deserialize)]
     struct YtDlpOutput {
         title: Option<String>,
@@ -65,7 +89,8 @@ fn parse_ytdlp_output(json_str: &str) -> Result<SongMetadata, String> {
         artist: Option<String>,
         duration: Option<f64>,
         thumbnail: Option<String>,
-        id: String,
+        #[allow(dead_code)]
+        id: Option<String>,
     }
     
     let data: YtDlpOutput = serde_json::from_str(json_str)
@@ -78,7 +103,7 @@ fn parse_ytdlp_output(json_str: &str) -> Result<SongMetadata, String> {
             .unwrap_or_else(|| "Unknown Artist".to_string()),
         duration: data.duration.unwrap_or(0.0) as u32,
         thumbnail_url: data.thumbnail.unwrap_or_else(|| {
-            format!("https://img.youtube.com/vi/{}/mqdefault.jpg", data.id)
+            format!("https://img.youtube.com/vi/{}/mqdefault.jpg", youtube_id)
         }),
     })
 }
@@ -97,7 +122,7 @@ mod tests {
             "thumbnail": "https://example.com/thumb.jpg"
         }"#;
         
-        let metadata = parse_ytdlp_output(json).unwrap();
+        let metadata = parse_ytdlp_output(json, "dQw4w9WgXcQ").unwrap();
         assert_eq!(metadata.title, "Test Song");
         assert_eq!(metadata.artist, "Test Artist");
         assert_eq!(metadata.duration, 213);

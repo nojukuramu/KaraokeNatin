@@ -7,9 +7,10 @@ interface QRDisplayProps {
     roomId: string | null;
 }
 
-const QRDisplay = ({ url, roomId }: QRDisplayProps) => {
+const QRDisplay = ({ url, roomId: _roomId }: QRDisplayProps) => {
     const [displayUrl, setDisplayUrl] = useState<string>('');
     const [loading, setLoading] = useState(true);
+    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         // Fetch the local network URL from the Tauri backend
@@ -28,44 +29,107 @@ const QRDisplay = ({ url, roomId }: QRDisplayProps) => {
         fetchQrUrl();
     }, [url]);
 
-    if (loading || !displayUrl || !roomId) {
+    const copyLink = async () => {
+        try {
+            await navigator.clipboard.writeText(displayUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
+        }
+    };
+
+    if (loading || !displayUrl) {
         return (
-            <div className="qr-display p-6 bg-white/10 rounded-lg">
-                <div className="text-center text-white/60">
-                    <div className="animate-spin h-8 w-8 border-4 border-white/30 border-t-white rounded-full mx-auto mb-3"></div>
-                    <p>Initializing room...</p>
-                </div>
+            <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                padding: '24px',
+                background: 'var(--bg-tertiary)',
+                borderRadius: '12px'
+            }}>
+                <div style={{
+                    width: '32px',
+                    height: '32px',
+                    border: '3px solid var(--bg-hover)',
+                    borderTopColor: 'var(--accent)',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                }}></div>
+                <p style={{ marginTop: '12px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                    Loading...
+                </p>
             </div>
         );
     }
 
     return (
-        <div className="qr-display p-6 bg-white/10 backdrop-blur rounded-lg">
-            <h2 className="text-2xl font-bold mb-4 text-white text-center">
-                Join Room
-            </h2>
-
-            <div className="bg-white p-4 rounded-lg mb-4">
+        <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '16px'
+        }}>
+            {/* QR Code */}
+            <div style={{
+                background: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }}>
                 <QRCodeSVG
                     value={displayUrl}
-                    size={200}
+                    size={180}
                     level="M"
-                    className="w-full h-auto"
                 />
             </div>
 
-            <div className="space-y-2 text-sm">
-                <div className="bg-white/5 p-3 rounded">
-                    <div className="text-white/60 text-xs mb-1">Room ID</div>
-                    <div className="text-white font-mono font-bold">
-                        {roomId}
-                    </div>
-                </div>
-
-                <div className="text-white/60 text-xs text-center mt-3">
-                    Scan QR code or enter Room ID manually
-                </div>
+            {/* URL Display */}
+            <div style={{
+                width: '100%',
+                background: 'var(--bg-tertiary)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '12px',
+                fontFamily: 'monospace',
+                color: 'var(--text-secondary)',
+                textAlign: 'center',
+                wordBreak: 'break-all'
+            }}>
+                {displayUrl}
             </div>
+
+            {/* Copy Button */}
+            <button
+                onClick={copyLink}
+                style={{
+                    width: '100%',
+                    padding: '10px 16px',
+                    background: copied ? 'var(--success)' : 'var(--bg-tertiary)',
+                    color: copied ? 'white' : 'var(--text-primary)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                    fontSize: '14px',
+                    transition: 'all 0.2s'
+                }}
+            >
+                {copied ? '✓ Copied!' : 'Copy Link'}
+            </button>
+
+            {/* Instructions */}
+            <p style={{
+                fontSize: '12px',
+                color: 'var(--text-secondary)',
+                textAlign: 'center',
+                margin: 0
+            }}>
+                Scan QR code or share link to join
+            </p>
         </div>
     );
 };

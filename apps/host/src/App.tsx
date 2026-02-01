@@ -16,7 +16,6 @@ interface SearchResult {
 function App() {
   const { roomState, initializeRoom } = useRoomState();
   const { connectionUrl, connectedClients } = usePeerHost();
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -58,26 +57,24 @@ function App() {
   return (
     <div className="app-container">
       <div className="main-area">
-        <Player
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
-        />
+        <Player />
       </div>
 
-      {!isFullscreen && (
-        <ControlPanel
-          connectionUrl={connectionUrl}
-          roomId={roomState?.roomId}
-          queue={roomState?.queue || []}
-          connectedClients={connectedClients}
-          isCollapsed={isPanelCollapsed}
-          onToggle={() => setIsPanelCollapsed(!isPanelCollapsed)}
-          onSearch={handleSearch}
-          searchResults={searchResults}
-          searching={searching}
-          onAddSong={handleAddSong}
-        />
-      )}
+      <ControlPanel
+        connectionUrl={connectionUrl}
+        roomId={roomState?.roomId}
+        queue={roomState?.queue || []}
+        playlist={roomState?.playlist || []}
+        connectedClients={connectedClients}
+        isCollapsed={isPanelCollapsed}
+        onToggle={() => setIsPanelCollapsed(!isPanelCollapsed)}
+        onSearch={handleSearch}
+        searchResults={searchResults}
+        searching={searching}
+        onAddSong={handleAddSong}
+        isPlaying={roomState?.player.status === 'playing'}
+        currentSong={roomState?.player.currentSong || null}
+      />
     </div>
   );
 }

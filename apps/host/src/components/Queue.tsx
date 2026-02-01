@@ -1,55 +1,121 @@
 import { Song } from '@karaokenatin/shared';
+import { invoke } from '@tauri-apps/api/core';
 
 interface QueueProps {
     songs: Song[];
 }
 
+// Icons for queue actions
+const Icons = {
+    chevronUp: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+        </svg>
+    ),
+    chevronDown: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+    ),
+    trash: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+    ),
+};
+
 const Queue = ({ songs }: QueueProps) => {
+    const handleMoveUp = async (songId: string) => {
+        try {
+            await invoke('process_command', {
+                command: { type: 'MOVE_SONG_UP', songId },
+            });
+        } catch (error) {
+            console.error('[Queue] Failed to move song up:', error);
+        }
+    };
+
+    const handleMoveDown = async (songId: string) => {
+        try {
+            await invoke('process_command', {
+                command: { type: 'MOVE_SONG_DOWN', songId },
+            });
+        } catch (error) {
+            console.error('[Queue] Failed to move song down:', error);
+        }
+    };
+
+    const handleRemove = async (songId: string) => {
+        try {
+            await invoke('process_command', {
+                command: { type: 'REMOVE_SONG', songId },
+            });
+        } catch (error) {
+            console.error('[Queue] Failed to remove song:', error);
+        }
+    };
+
     if (songs.length === 0) {
         return (
-            <div className="queue-display p-6 bg-white/10 rounded-lg">
-                <h2 className="text-xl font-bold mb-4 text-white">Queue</h2>
-                <div className="text-center text-white/60 py-8">
+            <div className="queue-display">
+                <h2 className="queue-header">Up Next</h2>
+                <div className="queue-empty">
                     <p>No songs in queue</p>
-                    <p className="text-sm mt-2">Add songs from your remote control</p>
+                    <p className="queue-empty-hint">Add songs from your remote</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="queue-display p-6 bg-white/10 rounded-lg">
-            <h2 className="text-xl font-bold mb-4 text-white">
-                Queue ({songs.length})
+        <div className="queue-display">
+            <h2 className="queue-header">
+                Up Next <span className="queue-count">{songs.length}</span>
             </h2>
 
-            <div className="space-y-3 max-h-96 overflow-y-auto">
+            <div className="queue-list">
                 {songs.map((song, index) => (
-                    <div
-                        key={song.id}
-                        className="flex items-center gap-3 p-3 bg-white/5 rounded-lg hover:bg-white/10 transition-colors"
-                    >
-                        <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-white/10 rounded-full">
-                            <span className="text-sm font-bold text-white">{index + 1}</span>
-                        </div>
+                    <div key={song.id} className="queue-item-compact">
+                        <div className="queue-number">{index + 1}</div>
 
                         <img
                             src={song.thumbnailUrl}
                             alt={song.title}
-                            className="w-16 h-12 object-cover rounded flex-shrink-0"
+                            className="queue-thumb-compact"
                         />
 
-                        <div className="flex-1 min-w-0">
-                            <div className="text-white font-semibold truncate">
-                                {song.title}
-                            </div>
-                            <div className="text-white/60 text-sm truncate">
-                                {song.artist}
+                        <div className="queue-info-compact">
+                            <div className="queue-title-compact">{song.title}</div>
+                            <div className="queue-meta-compact">
+                                {song.addedBy} • {formatDuration(song.duration)}
                             </div>
                         </div>
 
-                        <div className="text-white/60 text-sm flex-shrink-0">
-                            {formatDuration(song.duration)}
+                        <div className="queue-actions">
+                            <button
+                                className="queue-action-btn"
+                                onClick={() => handleMoveUp(song.id)}
+                                disabled={index === 0}
+                                title="Move up"
+                            >
+                                {Icons.chevronUp}
+                            </button>
+                            <button
+                                className="queue-action-btn"
+                                onClick={() => handleMoveDown(song.id)}
+                                disabled={index === songs.length - 1}
+                                title="Move down"
+                            >
+                                {Icons.chevronDown}
+                            </button>
+                            <button
+                                className="queue-action-btn queue-action-btn-danger"
+                                onClick={() => handleRemove(song.id)}
+                                title="Remove"
+                            >
+                                {Icons.trash}
+                            </button>
                         </div>
                     </div>
                 ))}

@@ -1,6 +1,53 @@
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::path::PathBuf;
+use std::fs;
+
+/// Get the playlist file path
+fn get_playlist_path() -> PathBuf {
+    // Use local app data directory
+    let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("KaraokeNatin");
+    fs::create_dir_all(&path).ok();
+    path.push("playlist.json");
+    path
+}
+
+/// Load playlist from file
+fn load_playlist_from_file() -> Vec<Song> {
+    let path = get_playlist_path();
+    if path.exists() {
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                match serde_json::from_str(&content) {
+                    Ok(playlist) => {
+                        log::info!("Loaded {} songs from playlist file", Vec::<Song>::len(&playlist));
+                        return playlist;
+                    }
+                    Err(e) => log::error!("Failed to parse playlist file: {}", e),
+                }
+            }
+            Err(e) => log::error!("Failed to read playlist file: {}", e),
+        }
+    }
+    Vec::new()
+}
+
+/// Save playlist to file
+fn save_playlist_to_file(playlist: &[Song]) {
+    let path = get_playlist_path();
+    match serde_json::to_string_pretty(playlist) {
+        Ok(content) => {
+            if let Err(e) = fs::write(&path, content) {
+                log::error!("Failed to write playlist file: {}", e);
+            } else {
+                log::info!("Saved {} songs to playlist file", playlist.len());
+            }
+        }
+        Err(e) => log::error!("Failed to serialize playlist: {}", e),
+    }
+}
 
 /// Represents a song in the queue
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +112,7 @@ pub struct RoomState {
     pub connected_clients: Vec<ConnectedClient>,
     pub player: PlayerState,
     pub queue: Vec<Song>,
+    pub playlist: Vec<Song>,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "updatedAt")]
@@ -88,6 +136,7 @@ impl RoomState {
                 is_muted: false,
             },
             queue: Vec::new(),
+            playlist: load_playlist_from_file(),
             created_at: now,
             updated_at: now,
         }
@@ -96,15 +145,16 @@ impl RoomState {
 
     /// Add a song to the queue
     pub fn add_song(&mut self, song: Song) {
-        let was_empty = self.queue.is_empty() && self.player.current_song.is_none();
-        self.queue.push(song);
-        
-        // Auto-play if queue was empty and nothing is playing
-        if was_empty {
-            self.play();
+        // If nothing is playing, set this song as current_song immediately
+        if self.player.current_song.is_none() {
+            self.player.current_song = Some(song);
+            self.player.status = PlayerStatus::Loading;
+            self.player.current_time = 0.0;
         } else {
-            self.touch();
+            // Otherwise add to the queue
+            self.queue.push(song);
         }
+        self.touch();
     }
 
     /// Remove a song from the queue by ID
@@ -210,16 +260,18 @@ impl RoomState {
     /// Skip to next song
     pub fn skip_song(&mut self) {
         if !self.queue.is_empty() {
-            self.queue.remove(0);
-            self.player.current_song = self.queue.first().cloned();
+            // Move the first song from queue to current_song
+            let next_song = self.queue.remove(0);
+            self.player.current_song = Some(next_song);
             self.player.current_time = 0.0;
-            self.player.status = if self.player.current_song.is_some() {
-                PlayerStatus::Loading
-            } else {
-                PlayerStatus::Idle
-            };
-            self.touch();
+            self.player.status = PlayerStatus::Loading;
+        } else {
+            // No more songs in queue, clear current song
+            self.player.current_song = None;
+            self.player.current_time = 0.0;
+            self.player.status = PlayerStatus::Idle;
         }
+        self.touch();
     }
 
     /// Play current song
@@ -228,7 +280,9 @@ impl RoomState {
             self.player.status = PlayerStatus::Playing;
             self.touch();
         } else if !self.queue.is_empty() {
-            self.player.current_song = Some(self.queue[0].clone());
+            // Move the first song from queue to current_song
+            let next_song = self.queue.remove(0);
+            self.player.current_song = Some(next_song);
             self.player.status = PlayerStatus::Loading;
             self.touch();
         }
@@ -258,6 +312,48 @@ impl RoomState {
     pub fn remove_client(&mut self, client_id: &str) {
         self.connected_clients.retain(|c| c.id != client_id);
         self.touch();
+    }
+
+    // ========== Playlist Management ==========
+
+    /// Add a song to the playlist
+    pub fn add_to_playlist(&mut self, song: Song) {
+        self.playlist.push(song);
+        save_playlist_to_file(&self.playlist);
+        self.touch();
+    }
+
+    /// Remove a song from the playlist by ID
+    pub fn remove_from_playlist(&mut self, song_id: &str) -> bool {
+        if let Some(pos) = self.playlist.iter().position(|s| s.id == song_id) {
+            self.playlist.remove(pos);
+            save_playlist_to_file(&self.playlist);
+            self.touch();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Copy a song from the playlist to the queue (or current_song if nothing is playing)
+    pub fn playlist_to_queue(&mut self, song_id: &str) -> bool {
+        if let Some(song) = self.playlist.iter().find(|s| s.id == song_id).cloned() {
+            // Create a new song instance with a new ID and timestamp
+            let new_song = Song {
+                id: uuid::Uuid::new_v4().to_string(),
+                youtube_id: song.youtube_id,
+                title: song.title,
+                artist: song.artist,
+                duration: song.duration,
+                thumbnail_url: song.thumbnail_url,
+                added_by: song.added_by,
+                added_at: chrono::Utc::now().timestamp_millis(),
+            };
+            self.add_song(new_song);
+            true
+        } else {
+            false
+        }
     }
 
     /// Update the timestamp

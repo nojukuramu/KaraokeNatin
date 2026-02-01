@@ -1,25 +1,45 @@
 import { useState } from 'react';
-import { ClientCommand } from '@karaokenatin/shared';
+import { useSendCommand, useInputFocus } from '@/lib/useRoomState';
 
-interface AddSongProps {
-    onCommand: (command: ClientCommand) => void;
-}
-
-export default function AddSong({ onCommand }: AddSongProps) {
+export default function AddSong() {
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [isAdding, setIsAdding] = useState(false);
+    const [addedType, setAddedType] = useState<'queue' | 'playlist' | null>(null);
+    const sendCommand = useSendCommand();
+    const setInputFocused = useInputFocus();
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleAddToQueue = async (e: React.FormEvent) => {
         e.preventDefault();
-
-        if (!youtubeUrl.trim()) return;
+        if (!youtubeUrl.trim() || !sendCommand) return;
 
         setIsAdding(true);
+        setInputFocused(false);
         try {
-            onCommand({ type: 'ADD_SONG', youtubeUrl: youtubeUrl.trim() });
+            sendCommand({ type: 'ADD_SONG', youtubeUrl: youtubeUrl.trim() });
             setYoutubeUrl('');
+            setAddedType('queue');
         } finally {
-            setTimeout(() => setIsAdding(false), 1000);
+            setTimeout(() => {
+                setIsAdding(false);
+                setAddedType(null);
+            }, 1500);
+        }
+    };
+
+    const handleAddToPlaylist = async () => {
+        if (!youtubeUrl.trim() || !sendCommand) return;
+
+        setIsAdding(true);
+        setInputFocused(false);
+        try {
+            sendCommand({ type: 'PLAYLIST_ADD', youtubeUrl: youtubeUrl.trim() });
+            setYoutubeUrl('');
+            setAddedType('playlist');
+        } finally {
+            setTimeout(() => {
+                setIsAdding(false);
+                setAddedType(null);
+            }, 1500);
         }
     };
 
@@ -27,22 +47,34 @@ export default function AddSong({ onCommand }: AddSongProps) {
         <div className="glass-card">
             <h2 className="text-xl font-bold mb-4">Add Song</h2>
 
-            <form onSubmit={handleSubmit} className="space-y-3">
+            <form onSubmit={handleAddToQueue} className="space-y-3">
                 <input
                     type="text"
                     value={youtubeUrl}
                     onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onFocus={() => setInputFocused(true)}
+                    onBlur={() => setInputFocused(false)}
                     placeholder="Paste YouTube URL or Video ID"
                     className="w-full px-4 py-3 rounded-lg bg-white/20 backdrop-blur border border-white/30 focus:outline-none focus:ring-2 focus:ring-primary-500 text-white placeholder-white/50"
                 />
 
-                <button
-                    type="submit"
-                    disabled={isAdding || !youtubeUrl.trim()}
-                    className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {isAdding ? '➕ Adding...' : '➕ Add to Queue'}
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        type="submit"
+                        disabled={isAdding || !youtubeUrl.trim()}
+                        className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {addedType === 'queue' ? '✓ Added to Queue!' : isAdding ? '➕ Adding...' : '➕ Add to Queue'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleAddToPlaylist}
+                        disabled={isAdding || !youtubeUrl.trim()}
+                        className="px-4 py-3 rounded-lg bg-white/20 hover:bg-white/30 border border-white/30 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {addedType === 'playlist' ? '✓ Added!' : '🎵 Playlist'}
+                    </button>
+                </div>
             </form>
 
             <div className="mt-4 text-xs text-white/60">

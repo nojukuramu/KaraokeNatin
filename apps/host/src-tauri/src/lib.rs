@@ -7,8 +7,14 @@ mod network;
 mod web_server;
 mod youtube;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use room_state::RoomStateManager;
 use uuid::Uuid;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -42,39 +48,63 @@ pub fn run() {
 
             // Start Node.js signaling server as sidecar process
             std::thread::spawn(|| {
-                log::info!("[Tauri] Starting signaling server sidecar...");
+                log::info!("[Tauri] Starting signaling server...");
                 
                 // In development, run from the signaling-server directory
-                #[cfg(debug_assertions)]
+                #[cfg(all(debug_assertions, target_os = "windows"))]
                 {
-                    let status = std::process::Command::new("node")
-                        .current_dir("../../signaling-server")
+                    let mut cmd = std::process::Command::new("node");
+                    cmd.current_dir("../../signaling-server")
                         .arg("dist/index.js")
-                        .spawn();
+                        .creation_flags(CREATE_NO_WINDOW);
                     
-                    match status {
+                    match cmd.spawn() {
                         Ok(mut child) => {
                             log::info!("[Tauri] Signaling server started (dev mode)");
                             let _ = child.wait();
                         }
                         Err(e) => {
                             log::error!("[Tauri] Failed to start signaling server: {}", e);
-                            log::info!("[Tauri] Trying with npx...");
+                            log::info!("[Tauri] Trying with tsx...");
                             
-                            // Fallback: try running the TypeScript directly
-                            let _ = std::process::Command::new("npx")
-                                .current_dir("../../signaling-server")
-                                .args(["ts-node", "src/index.ts"])
-                                .spawn();
+                            // Fallback: try running with tsx
+                            let mut fallback = std::process::Command::new("npx");
+                            fallback.current_dir("../../signaling-server")
+                                .args(["tsx", "src/index.ts"])
+                                .creation_flags(CREATE_NO_WINDOW);
+                            let _ = fallback.spawn();
                         }
                     }
                 }
                 
-                // In production, run bundled signaling server
-                #[cfg(not(debug_assertions))]
+                // In production, run bundled signaling server executable
+                #[cfg(all(not(debug_assertions), target_os = "windows"))]
                 {
-                    // TODO: Bundle node executable and signaling server
-                    log::info!("[Tauri] Production signaling server (bundled)");
+                    use std::env;
+                    
+                    // Get the directory where the executable is located
+                    let exe_dir = env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                        .unwrap_or_default();
+                    
+                    // Tauri strips the target triple, so it's just "signaling-server.exe"
+                    let signaling_path = exe_dir.join("signaling-server.exe");
+                    
+                    log::info!("[Tauri] Starting bundled signaling server: {:?}", signaling_path);
+                    
+                    let mut cmd = std::process::Command::new(&signaling_path);
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    
+                    match cmd.spawn() {
+                        Ok(mut child) => {
+                            log::info!("[Tauri] Signaling server started (production)");
+                            let _ = child.wait();
+                        }
+                        Err(e) => {
+                            log::error!("[Tauri] Failed to start signaling server: {}", e);
+                        }
+                    }
                 }
             });
 
