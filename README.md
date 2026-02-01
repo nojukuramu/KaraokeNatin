@@ -60,6 +60,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 This means you're free to use, modify, and distribute this software for personal or commercial purposes. We just ask that you include the original copyright notice.
 
+### Third-Party Licenses
+
+KaraokeNatin uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube video integration. The yt-dlp project and its bundled dependencies are subject to their respective licenses:
+
+- **yt-dlp core**: Licensed under [The Unlicense](licenses/yt-dlp-LICENSE.txt) (public domain)
+- **yt-dlp Windows executable**: The bundled Windows executable includes third-party components under various licenses including GPLv3+. See [yt-dlp Third-Party Licenses](licenses/yt-dlp-THIRD_PARTY_LICENSES.txt) for complete details.
+
+For full license texts and attribution details, please refer to the files in the [licenses](licenses/) directory.
+
 ## 📚 Additional Resources
 
 - [Quick Start Guide](QUICK_START.md) - Step-by-step setup for developers
