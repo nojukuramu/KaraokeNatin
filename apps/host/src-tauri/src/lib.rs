@@ -13,11 +13,39 @@ use std::os::windows::process::CommandExt;
 use room_state::RoomStateManager;
 use uuid::Uuid;
 
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Global flag to track if shutdown is in progress
+static SHUTDOWN_FLAG: std::sync::OnceLock<Arc<AtomicBool>> = std::sync::OnceLock::new();
+
+/// Child process handle for cleanup
+static CHILD_PROCESS: std::sync::OnceLock<std::sync::Mutex<Option<std::process::Child>>> = std::sync::OnceLock::new();
+
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+fn cleanup_child_processes() {
+    if let Some(flag) = SHUTDOWN_FLAG.get() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    
+    if let Some(child_mutex) = CHILD_PROCESS.get() {
+        if let Ok(mut guard) = child_mutex.lock() {
+            if let Some(ref mut child) = *guard {
+                log::info!("[Tauri] Killing signaling server process...");
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize shutdown tracking
+    let _ = SHUTDOWN_FLAG.get_or_init(|| Arc::new(AtomicBool::new(false)));
+    let _ = CHILD_PROCESS.get_or_init(|| std::sync::Mutex::new(None));
     // Initialize room state manager with placeholder values
     // These will be replaced when create_room is called
     let initial_room_id = "pending".to_string();
@@ -72,7 +100,22 @@ pub fn run() {
                     match cmd.spawn() {
                         Ok(mut child) => {
                             log::info!("[Tauri] Signaling server started (dev mode)");
-                            let _ = child.wait();
+                            // Store handle for cleanup
+                            if let Some(child_mutex) = CHILD_PROCESS.get() {
+                                if let Ok(mut guard) = child_mutex.lock() {
+                                    *guard = Some(child);
+                                }
+                            }
+                            // We can't wait on child because we moved it into the mutex
+                            // But keeping the thread alive acts as a monitor
+                            loop {
+                                if let Some(flag) = SHUTDOWN_FLAG.get() {
+                                    if flag.load(Ordering::SeqCst) {
+                                        break;
+                                    }
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
                         }
                         Err(e) => {
                             log::error!("[Tauri] Failed to start signaling server: {}", e);
@@ -112,7 +155,20 @@ pub fn run() {
                     match cmd.spawn() {
                         Ok(mut child) => {
                             log::info!("[Tauri] Signaling server started (production)");
-                            let _ = child.wait();
+                            // Store handle for cleanup
+                            if let Some(child_mutex) = CHILD_PROCESS.get() {
+                                if let Ok(mut guard) = child_mutex.lock() {
+                                    *guard = Some(child);
+                                }
+                            }
+                            loop {
+                                if let Some(flag) = SHUTDOWN_FLAG.get() {
+                                    if flag.load(Ordering::SeqCst) {
+                                        break;
+                                    }
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
                         }
                         Err(e) => {
                             log::error!("[Tauri] Failed to start signaling server: {}", e);
@@ -142,6 +198,12 @@ pub fn run() {
             commands::process_command,
             commands::update_player_state,
         ])
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                log::info!("[Tauri] Window close requested, terminating child processes...");
+                cleanup_child_processes();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

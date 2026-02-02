@@ -84,7 +84,7 @@ const Player = () => {
     const [showScoring, setShowScoring] = useState(false);
     const [currentScore, setCurrentScore] = useState(0);
     const [lastSongTitle, setLastSongTitle] = useState('');
-    const [showControls, setShowControls] = useState(false);
+
 
     // Handle fullscreen change events
     useEffect(() => {
@@ -99,26 +99,9 @@ const Player = () => {
     }, []);
 
     // Custom control handlers
-    const handlePlayPause = useCallback(async () => {
-        const isPlaying = roomState?.player.status === 'playing';
-        try {
-            await invoke('process_command', {
-                command: { type: isPlaying ? 'PAUSE' : 'PLAY' },
-            });
-        } catch (error) {
-            console.error('[Player] Failed to toggle play/pause:', error);
-        }
-    }, [roomState?.player.status]);
 
-    const handleSkip = useCallback(async () => {
-        try {
-            await invoke('process_command', {
-                command: { type: 'SKIP' },
-            });
-        } catch (error) {
-            console.error('[Player] Failed to skip:', error);
-        }
-    }, []);
+
+
 
     // Toggle true browser fullscreen
     const toggleFullscreen = useCallback(async () => {
@@ -324,13 +307,11 @@ const Player = () => {
     }, [roomState?.player.status]);
 
     const currentSong = roomState?.player.currentSong;
-    const isPlaying = roomState?.player.status === 'playing';
+
 
     const playerContent = (
         <div
             style={{ position: 'relative', width: '100%', height: '100%' }}
-            onMouseEnter={() => setShowControls(true)}
-            onMouseLeave={() => setShowControls(false)}
         >
             {!isAPIReady ? (
                 <div className="player-idle">
@@ -368,27 +349,7 @@ const Player = () => {
                             </p>
                         </div>
                     )}
-                    {/* Custom controls overlay */}
-                    {currentSong && (
-                        <div className={`player-controls-overlay ${showControls ? 'visible' : ''}`}>
-                            <div className="player-controls-bar">
-                                <button
-                                    className="player-control-btn player-control-btn-primary"
-                                    onClick={handlePlayPause}
-                                    title={isPlaying ? 'Pause' : 'Play'}
-                                >
-                                    {isPlaying ? Icons.pause : Icons.play}
-                                </button>
-                                <button
-                                    className="player-control-btn"
-                                    onClick={handleSkip}
-                                    title="Skip"
-                                >
-                                    {Icons.skipForward}
-                                </button>
-                            </div>
-                        </div>
-                    )}
+                    {/* Overlay idle message on top when no song */}
                 </>
             )}
         </div>

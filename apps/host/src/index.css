@@ -486,61 +486,7 @@ body {
   }
 }
 
-/* ========== Custom Player Controls ========== */
-.player-controls-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 20px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
-  opacity: 0.7;
-  transition: opacity 0.3s ease;
-  z-index: 20;
-  pointer-events: auto;
-}
 
-.player-controls-overlay:hover,
-.player-controls-overlay.visible {
-  opacity: 1;
-}
-
-.player-controls-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
-
-.player-control-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.player-control-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
-  transform: scale(1.05);
-}
-
-.player-control-btn-primary {
-  width: 72px;
-  height: 72px;
-  background: var(--accent);
-}
-
-.player-control-btn-primary:hover {
-  background: var(--accent-hover);
-}
 
 /* ========== Compact Queue Styles ========== */
 .queue-display {

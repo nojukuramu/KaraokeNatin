@@ -15,12 +15,20 @@ pub struct SearchResult {
     pub url: String,
 }
 
+/// Cache TTL in seconds (30 minutes)
+const CACHE_TTL_SECS: u64 = 1800;
+
 /// Cache entry with timestamp for potential TTL
 #[derive(Debug, Clone)]
 struct CacheEntry {
     results: Vec<SearchResult>,
-    #[allow(dead_code)]
     cached_at: std::time::Instant,
+}
+
+impl CacheEntry {
+    fn is_expired(&self) -> bool {
+        self.cached_at.elapsed().as_secs() > CACHE_TTL_SECS
+    }
 }
 
 /// Thread-safe in-memory cache for search results
@@ -61,8 +69,12 @@ pub async fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>
     {
         let cache = SEARCH_CACHE.read();
         if let Some(entry) = cache.get(&cache_key) {
-            log::info!("[YouTube] Cache hit for: {}", karaoke_query);
-            return Ok(entry.results.clone());
+            if !entry.is_expired() {
+                log::info!("[YouTube] Cache hit for: {}", karaoke_query);
+                return Ok(entry.results.clone());
+            } else {
+                log::info!("[YouTube] Cache expired for: {}", karaoke_query);
+            }
         }
     }
     

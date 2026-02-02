@@ -47,7 +47,7 @@ async function findAvailablePort(preferred: number): Promise<number> {
     if (await isPortAvailable(preferred)) {
         return preferred;
     }
-    
+
     // Try a range of ports
     for (let port = preferred + 1; port <= preferred + 100; port++) {
         if (await isPortAvailable(port)) {
@@ -55,7 +55,7 @@ async function findAvailablePort(preferred: number): Promise<number> {
             return port;
         }
     }
-    
+
     // Use 0 to let OS assign a port
     return 0;
 }
@@ -189,7 +189,7 @@ function handleDisconnect(socket: any): void {
  */
 async function startServer() {
     const port = await findAvailablePort(PREFERRED_PORT);
-    
+
     httpServer.listen(port, '0.0.0.0', () => {
         const addr = httpServer.address();
         const actualPort = typeof addr === 'object' && addr ? addr.port : port;
@@ -208,6 +208,16 @@ startServer().catch((err) => {
  */
 process.on('SIGTERM', () => {
     console.log('[Server] SIGTERM received, shutting down gracefully');
+    roomManager.destroy();
+    io.close(() => {
+        httpServer.close(() => {
+            process.exit(0);
+        });
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('[Server] SIGINT received, shutting down gracefully');
     roomManager.destroy();
     io.close(() => {
         httpServer.close(() => {
