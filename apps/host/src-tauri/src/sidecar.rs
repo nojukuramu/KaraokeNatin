@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// Metadata fetched from yt-dlp
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SongMetadata {
@@ -40,13 +43,17 @@ pub async fn fetch_metadata(youtube_id: &str) -> Result<SongMetadata, String> {
     log::info!("Fetching metadata for: {} using {}", youtube_id, ytdlp_path);
     
     // Try to execute yt-dlp binary using tokio for async
-    let output = tokio::process::Command::new(&ytdlp_path)
-        .arg("--dump-json")
+    let mut cmd = tokio::process::Command::new(&ytdlp_path);
+    cmd.arg("--dump-json")
         .arg("--no-playlist")
         .arg("--skip-download")
-        .arg(&url)
-        .output()
-        .await;
+        .arg(&url);
+    
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    
+    let output = cmd.output().await;
     
     match output {
         Ok(output) => {

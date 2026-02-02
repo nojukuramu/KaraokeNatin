@@ -4,6 +4,9 @@ use std::sync::LazyLock;
 use parking_lot::RwLock;
 use tokio::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// Search result from YouTube
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -98,15 +101,21 @@ pub async fn search_youtube(query: &str, limit: u32) -> Result<Vec<SearchResult>
     let search_query = format!("ytsearch{}:{}", limit, karaoke_query);
     
     // Run yt-dlp with JSON output using tokio for async execution
-    let output = Command::new(&ytdlp_path)
-        .args([
-            &search_query,
-            "--dump-json",           // Output as JSON
-            "--flat-playlist",       // Don't download, just get info
-            "--no-download",
-            "--no-warnings",
-            "--ignore-errors",
-        ])
+    let mut cmd = Command::new(&ytdlp_path);
+    cmd.args([
+        &search_query,
+        "--dump-json",           // Output as JSON
+        "--flat-playlist",       // Don't download, just get info
+        "--no-download",
+        "--no-warnings",
+        "--ignore-errors",
+    ]);
+    
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    
+    let output = cmd
         .output()
         .await
         .map_err(|e| format!("Failed to run yt-dlp: {}", e))?;
