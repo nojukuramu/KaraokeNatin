@@ -1,6 +1,6 @@
 use crate::room_state::{RoomStateManager, Song, PlayerStatus};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 /// Client command types (from P2P protocol)
@@ -253,6 +253,70 @@ pub fn update_player_state(
     app.emit("room_state_updated", new_state)
         .map_err(|e| e.to_string())?;
     
+    Ok(())
+}
+
+/// Open the logs folder in the system file explorer
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(log_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(log_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(log_dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Open the GitHub issue report page
+#[tauri::command]
+pub fn report_issue() -> Result<(), String> {
+    let url = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 
