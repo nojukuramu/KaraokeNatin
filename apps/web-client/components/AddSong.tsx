@@ -62,15 +62,26 @@ export default function AddSong() {
                     <button
                         type="submit"
                         disabled={isAdding || !youtubeUrl.trim()}
-                        className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px]"
                     >
-                        {addedType === 'queue' ? '✓ Added to Queue!' : isAdding ? '➕ Adding...' : '➕ Add to Queue'}
+                        <span className="inline-flex items-center justify-center gap-2">
+                            {addedType === 'queue' ? (
+                                <>✓ Added to Queue!</>
+                            ) : isAdding ? (
+                                <>
+                                    <span className="inline-block animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full"></span>
+                                    Adding...
+                                </>
+                            ) : (
+                                <>➕ Add to Queue</>
+                            )}
+                        </span>
                     </button>
                     <button
                         type="button"
                         onClick={handleAddToPlaylist}
                         disabled={isAdding || !youtubeUrl.trim()}
-                        className="px-4 py-3 rounded-lg bg-white/20 hover:bg-white/30 border border-white/30 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-3 rounded-lg bg-white/20 hover:bg-white/30 border border-white/30 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[48px] flex items-center justify-center"
                     >
                         {addedType === 'playlist' ? '✓ Added!' : '🎵 Playlist'}
                     </button>
