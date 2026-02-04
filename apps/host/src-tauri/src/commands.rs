@@ -260,64 +260,49 @@ pub fn update_player_state(
 #[tauri::command]
 pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
     let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(log_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(log_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(log_dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    open_path(log_dir)
 }
 
 /// Open the GitHub issue report page
 #[tauri::command]
 pub fn report_issue() -> Result<(), String> {
     let url = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
+    open_path(url)
+}
 
+/// Helper function to open a path or URL in the default application
+fn open_path<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(url)
+            .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
+        return Ok(());
     }
 
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(url)
+            .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
+        return Ok(());
     }
 
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(url)
+            .arg(path)
             .spawn()
             .map_err(|e| e.to_string())?;
+        return Ok(());
     }
 
-    Ok(())
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Unsupported operating system".to_string())
+    }
 }
 
 /// Response types
