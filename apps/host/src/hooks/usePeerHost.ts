@@ -6,8 +6,6 @@ import { HostBroadcast, isClientCommand, RoomState } from '@karaokenatin/shared'
 import { processCommand, getRoomState } from '../lib/commands';
 import { hashToken } from '../lib/security';
 
-const SIGNALING_SERVER_URL = 'http://localhost:3001';
-
 /**
  * Hook to manage PeerJS host and WebRTC connections
  */
@@ -61,19 +59,41 @@ export function usePeerHost() {
             const joinToken = generateJoinToken();
             const joinTokenHash = await hashToken(joinToken);
 
-            // Connect to signaling server
-            const socketInstance = io(SIGNALING_SERVER_URL);
+            try {
+                // Connect to signaling server
+                const { invoke } = await import('@tauri-apps/api/core');
+                const port = await invoke<number>('get_server_port');
+                const socketInstance = io(`http://localhost:${port}`);
 
-            // Include peerId when creating room so clients can connect
-            socketInstance.emit('CREATE_ROOM', { roomId, joinTokenHash, hostPeerId: peerId });
+                // Handle socket errors
+                socketInstance.on('connect_error', (err) => {
+                    console.error('[PeerHost] Socket connection error:', err);
+                });
 
-            socketInstance.on('ROOM_CREATED', () => {
-                console.log('[PeerHost] Room created on signaling server');
-                const url = `${window.location.origin}/join?r=${roomId}&t=${joinToken}`;
-                setConnectionUrl(url);
-            });
+                socketInstance.on('error', (err) => {
+                    console.error('[PeerHost] Socket error:', err);
+                });
 
-            setSocket(socketInstance);
+                // Include peerId when creating room so clients can connect
+                socketInstance.emit('CREATE_ROOM', { roomId, joinTokenHash, hostPeerId: peerId });
+
+                socketInstance.on('ROOM_CREATED', async () => {
+                    console.log('[PeerHost] Room created on signaling server');
+                    // Get the base URL (http://ip:port) from the backend
+                    try {
+                        const baseUrl = await invoke<string>('get_qr_url');
+                        // For remote-ui, we just point to the root. It auto-discovers the room.
+                        setConnectionUrl(baseUrl);
+                    } catch (e) {
+                        console.error('Failed to get QR URL:', e);
+                        setConnectionUrl(`${window.location.origin}/join?r=${roomId}&t=${joinToken}`);
+                    }
+                });
+
+                setSocket(socketInstance);
+            } catch (error) {
+                console.error('[PeerHost] Failed to initialize signaling connection:', error);
+            }
         });
 
         peerInstance.on('connection', (conn) => {
