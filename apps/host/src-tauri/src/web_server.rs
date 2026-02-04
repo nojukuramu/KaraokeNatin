@@ -7,6 +7,8 @@ use axum::{
 use tower_http::cors::{CorsLayer, Any};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, Ordering};
+use socketioxide::SocketIo;
+use crate::signaling::{RoomManager, on_connect};
 
 /// The embedded remote control UI HTML
 const REMOTE_UI_HTML: &str = include_str!("../remote-ui/index.html");
@@ -52,11 +54,19 @@ pub async fn start_web_server() -> Result<(), String> {
     
     log::info!("[WebServer] Starting embedded web server on port {}", port);
 
+    // Initialize Socket.io
+    let (layer, io) = SocketIo::builder()
+        .with_state(RoomManager::new())
+        .build_layer();
+
+    io.ns("/", on_connect);
+
     // Create router
     let app = Router::new()
         // Serve the remote control UI
         .route("/", get(serve_index))
         .route("/health", get(health_check))
+        .layer(layer) // Socket.io layer
         // Add CORS for local development
         .layer(
             CorsLayer::new()

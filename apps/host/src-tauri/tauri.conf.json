@@ -34,10 +34,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/yt-dlp",
-      "binaries/signaling-server"
-    ],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

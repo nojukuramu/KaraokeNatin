@@ -86,6 +86,12 @@ pub fn get_qr_url() -> Result<String, String> {
     crate::network::generate_qr_url()
 }
 
+/// Get the web server port
+#[tauri::command]
+pub fn get_server_port() -> u16 {
+    crate::web_server::get_server_port()
+}
+
 /// Get the current room state
 #[tauri::command]
 pub fn get_room_state(state: tauri::State<RoomStateManager>) -> Result<crate::room_state::RoomState, String> {

@@ -6,46 +6,13 @@ mod sidecar;
 mod network;
 mod web_server;
 mod youtube;
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+mod signaling;
 
 use room_state::RoomStateManager;
 use uuid::Uuid;
 
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Global flag to track if shutdown is in progress
-static SHUTDOWN_FLAG: std::sync::OnceLock<Arc<AtomicBool>> = std::sync::OnceLock::new();
-
-/// Child process handle for cleanup
-static CHILD_PROCESS: std::sync::OnceLock<std::sync::Mutex<Option<std::process::Child>>> = std::sync::OnceLock::new();
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-fn cleanup_child_processes() {
-    if let Some(flag) = SHUTDOWN_FLAG.get() {
-        flag.store(true, Ordering::SeqCst);
-    }
-    
-    if let Some(child_mutex) = CHILD_PROCESS.get() {
-        if let Ok(mut guard) = child_mutex.lock() {
-            if let Some(ref mut child) = *guard {
-                log::info!("[Tauri] Killing signaling server process...");
-                let _ = child.kill();
-            }
-        }
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize shutdown tracking
-    let _ = SHUTDOWN_FLAG.get_or_init(|| Arc::new(AtomicBool::new(false)));
-    let _ = CHILD_PROCESS.get_or_init(|| std::sync::Mutex::new(None));
     // Initialize room state manager with placeholder values
     // These will be replaced when create_room is called
     let initial_room_id = "pending".to_string();
@@ -77,105 +44,8 @@ pub fn run() {
             // Wait a moment for web server to bind its port
             std::thread::sleep(std::time::Duration::from_millis(500));
             
-            // Calculate signaling port based on web server port
             let web_port = web_server::get_server_port();
-            let signaling_port = 3001_i32 + (web_port as i32 - 8080);
-            let signaling_port = signaling_port.max(1024) as u16; // Ensure valid port
-            
-            log::info!("[Tauri] Web server on port {}, signaling will use port {}", web_port, signaling_port);
-
-            // Start Node.js signaling server as sidecar process
-            std::thread::spawn(move || {
-                log::info!("[Tauri] Starting signaling server on port {}...", signaling_port);
-                
-                // In development, run from the signaling-server directory
-                #[cfg(all(debug_assertions, target_os = "windows"))]
-                {
-                    let mut cmd = std::process::Command::new("node");
-                    cmd.current_dir("../../signaling-server")
-                        .arg("dist/index.js")
-                        .env("PORT", signaling_port.to_string())
-                        .creation_flags(CREATE_NO_WINDOW);
-                    
-                    match cmd.spawn() {
-                        Ok(mut child) => {
-                            log::info!("[Tauri] Signaling server started (dev mode)");
-                            // Store handle for cleanup
-                            if let Some(child_mutex) = CHILD_PROCESS.get() {
-                                if let Ok(mut guard) = child_mutex.lock() {
-                                    *guard = Some(child);
-                                }
-                            }
-                            // We can't wait on child because we moved it into the mutex
-                            // But keeping the thread alive acts as a monitor
-                            loop {
-                                if let Some(flag) = SHUTDOWN_FLAG.get() {
-                                    if flag.load(Ordering::SeqCst) {
-                                        break;
-                                    }
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("[Tauri] Failed to start signaling server: {}", e);
-                            log::info!("[Tauri] Trying with tsx...");
-                            
-                            // Fallback: try running with tsx
-                            let mut fallback = std::process::Command::new("npx");
-                            fallback.current_dir("../../signaling-server")
-                                .args(["tsx", "src/index.ts"])
-                                .env("PORT", signaling_port.to_string())
-                                .creation_flags(CREATE_NO_WINDOW);
-                            let _ = fallback.spawn();
-                        }
-                    }
-                }
-                
-                // In production, run bundled signaling server executable
-                #[cfg(all(not(debug_assertions), target_os = "windows"))]
-                {
-                    use std::env;
-                    
-                    // Get the directory where the executable is located
-                    let exe_dir = env::current_exe()
-                        .ok()
-                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                        .unwrap_or_default();
-                    
-                    // Tauri strips the target triple, so it's just "signaling-server.exe"
-                    let signaling_path = exe_dir.join("signaling-server.exe");
-                    
-                    log::info!("[Tauri] Starting bundled signaling server: {:?}", signaling_path);
-                    
-                    let mut cmd = std::process::Command::new(&signaling_path);
-                    cmd.env("PORT", signaling_port.to_string())
-                        .creation_flags(CREATE_NO_WINDOW);
-                    
-                    match cmd.spawn() {
-                        Ok(mut child) => {
-                            log::info!("[Tauri] Signaling server started (production)");
-                            // Store handle for cleanup
-                            if let Some(child_mutex) = CHILD_PROCESS.get() {
-                                if let Ok(mut guard) = child_mutex.lock() {
-                                    *guard = Some(child);
-                                }
-                            }
-                            loop {
-                                if let Some(flag) = SHUTDOWN_FLAG.get() {
-                                    if flag.load(Ordering::SeqCst) {
-                                        break;
-                                    }
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("[Tauri] Failed to start signaling server: {}", e);
-                        }
-                    }
-                }
-            });
+            log::info!("[Tauri] Web server (and signaling) on port {}", web_port);
 
             // Log local IP for QR code generation
             match network::generate_qr_url() {
@@ -193,17 +63,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::create_room,
             commands::get_qr_url,
+            commands::get_server_port,
             commands::get_room_state,
             commands::search_youtube,
             commands::process_command,
             commands::update_player_state,
         ])
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                log::info!("[Tauri] Window close requested, terminating child processes...");
-                cleanup_child_processes();
-            }
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
