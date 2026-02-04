@@ -44,15 +44,15 @@ impl RoomManager {
             .as_millis() as u64;
 
         rooms.insert(room_id.clone(), RoomMetadata {
-            room_id,
-            host_socket_id,
+            room_id: room_id.clone(),
+            host_socket_id: host_socket_id.clone(),
             host_peer_id,
             join_token_hash,
             created_at: now,
             client_count: 0,
         });
 
-        log::info!("[Signaling] Room created: {} (host_socket: {})", rooms.get(&room_id).unwrap().room_id, host_socket_id);
+        log::info!("[Signaling] Room created: {} (host_socket: {})", room_id, host_socket_id);
         Ok(())
     }
 
@@ -60,24 +60,30 @@ impl RoomManager {
         self.rooms.read().get(room_id).cloned()
     }
 
-    pub fn verify_room(&self, room_id: &str, join_token: &str) -> Result<RoomMetadata, String> {
-        let room = self.get_room(room_id).ok_or("Room not found")?;
+    /// Try to join a room: verifies token (if provided) and capacity atomically.
+    /// If valid, increments client count and returns RoomMetadata.
+    pub fn try_join_room(&self, room_id: &str, join_token: Option<&str>) -> Result<RoomMetadata, String> {
+        let mut rooms = self.rooms.write();
 
-        let token_hash = hash_token(join_token);
-        if token_hash != room.join_token_hash {
-            return Err("Invalid token".to_string());
-        }
+        if let Some(room) = rooms.get_mut(room_id) {
+            // Check token if provided
+            if let Some(token) = join_token {
+                let token_hash = hash_token(token);
+                if token_hash != room.join_token_hash {
+                    return Err("Invalid token".to_string());
+                }
+            }
 
-        if room.client_count >= MAX_CLIENTS_PER_ROOM {
-            return Err("Room is full".to_string());
-        }
+            // Check capacity
+            if room.client_count >= MAX_CLIENTS_PER_ROOM {
+                return Err("Room is full".to_string());
+            }
 
-        Ok(room)
-    }
-
-    pub fn add_client(&self, room_id: &str) {
-        if let Some(room) = self.rooms.write().get_mut(room_id) {
+            // Increment count
             room.client_count += 1;
+            Ok(room.clone())
+        } else {
+            Err("Room not found".to_string())
         }
     }
 
@@ -219,17 +225,19 @@ pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
 
         match target_room_id {
             Some(room_id) => {
-                let room_res = if data.room_id.as_deref().unwrap_or("") == "default" || data.room_id.as_deref().unwrap_or("").is_empty() {
-                    // Start mode - just get the room if it exists (we already got ID)
-                    state.get_room(&room_id).ok_or("Room not found".to_string())
+                // Check if this is standalone/default mode where we skip token verification
+                let should_skip_token = data.room_id.as_deref().unwrap_or("") == "default" || data.room_id.as_deref().unwrap_or("").is_empty();
+
+                let token_to_verify = if should_skip_token {
+                    None
                 } else {
-                    state.verify_room(&room_id, &data.join_token)
+                    Some(data.join_token.as_str())
                 };
 
-                match room_res {
+                // Use try_join_room which handles capacity check and increment atomically
+                match state.try_join_room(&room_id, token_to_verify) {
                     Ok(room) => {
                         let _ = socket.join(room_id.clone());
-                        state.add_client(&room_id);
 
                         // Store metadata in socket extensions
                         socket.extensions.insert(ConnectedRoomId(room_id.clone()));
@@ -284,4 +292,70 @@ pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
              }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_token() {
+        let token = "test_token";
+        let hash = hash_token(token);
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_create_room() {
+        let manager = RoomManager::new();
+        let room_id = "test_room".to_string();
+        let socket_id = "socket_123".to_string();
+        let hash = "hash_123".to_string();
+
+        assert!(manager.create_room(room_id.clone(), socket_id.clone(), hash.clone(), None).is_ok());
+        assert!(manager.get_room(&room_id).is_some());
+
+        // Duplicate
+        assert!(manager.create_room(room_id, socket_id, hash, None).is_err());
+    }
+
+    #[test]
+    fn test_try_join_room() {
+        let manager = RoomManager::new();
+        let room_id = "test_room".to_string();
+        let token = "token";
+        let token_hash = hash_token(token);
+
+        manager.create_room(room_id.clone(), "host".to_string(), token_hash, None).unwrap();
+
+        // Valid join
+        let res = manager.try_join_room(&room_id, Some(token));
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap().client_count, 1);
+
+        // Invalid token
+        assert!(manager.try_join_room(&room_id, Some("wrong")).is_err());
+
+        // Skip token (standalone mode simulation - if verify skipped)
+        let res_skip = manager.try_join_room(&room_id, None);
+        assert!(res_skip.is_ok());
+        assert_eq!(res_skip.unwrap().client_count, 2);
+    }
+
+    #[test]
+    fn test_room_capacity() {
+        let manager = RoomManager::new();
+        let room_id = "full_room".to_string();
+        manager.create_room(room_id.clone(), "host".to_string(), "hash".to_string(), None).unwrap();
+
+        // Fill room
+        for _ in 0..MAX_CLIENTS_PER_ROOM {
+            manager.add_client(&room_id);
+        }
+
+        // Try join
+        let res = manager.try_join_room(&room_id, None);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "Room is full");
+    }
 }
