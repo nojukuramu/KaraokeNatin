@@ -260,6 +260,12 @@ pub fn update_player_state(
 #[tauri::command]
 pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
     let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+
+    // Ensure the log directory exists before attempting to open it
+    std::fs::create_dir_all(&log_dir).map_err(|e| {
+        format!("Failed to create log directory {:?}: {}", log_dir, e)
+    })?;
+
     open_path(log_dir)
 }
 

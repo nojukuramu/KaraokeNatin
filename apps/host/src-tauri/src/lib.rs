@@ -58,6 +58,8 @@ pub fn run() {
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Info)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                    .max_file_size(10 * 1024 * 1024) // 10MB
                     .build(),
             )?;
 

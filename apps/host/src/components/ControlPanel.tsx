@@ -228,6 +228,8 @@ const ControlPanel = ({
                             className="btn-icon"
                             onClick={() => setShowHelp(true)}
                             title="Report Issue / Help"
+                            aria-label="Report Issue / Help"
+                            type="button"
                         >
                             {Icons.bug}
                         </button>
