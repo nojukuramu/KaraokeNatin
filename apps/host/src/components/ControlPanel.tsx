@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import QRDisplay from './QRDisplay';
 import Queue from './Queue';
 import { Song } from '../hooks/useRoomState';
+import HelpDialog from './HelpDialog';
 
 interface SearchResult {
     url: string;
@@ -116,6 +117,19 @@ const Icons = {
             <line x1="23" y1="11" x2="17" y2="11"></line>
         </svg>
     ),
+    bug: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect width="8" height="14" x="8" y="6" rx="4" />
+            <path d="m19 7-3 3" />
+            <path d="m5 7 3 3" />
+            <path d="m19 19-3-3" />
+            <path d="m5 19 3-3" />
+            <path d="M20 13h-4" />
+            <path d="M4 13h4" />
+            <path d="m10 4 1 2" />
+            <path d="m14 4-1 2" />
+        </svg>
+    ),
 };
 
 const ControlPanel = ({
@@ -136,6 +150,7 @@ const ControlPanel = ({
     const [searchQuery, setSearchQuery] = useState('');
     const [theme, setTheme] = useState<'dark' | 'light'>('dark');
     const [showInvite, setShowInvite] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -209,6 +224,15 @@ const ControlPanel = ({
                 <div className="control-panel-header">
                     <span className="control-panel-title">KaraokeNatin</span>
                     <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                            className="btn-icon"
+                            onClick={() => setShowHelp(true)}
+                            title="Report Issue / Help"
+                            aria-label="Report Issue / Help"
+                            type="button"
+                        >
+                            {Icons.bug}
+                        </button>
                         <button className="btn-icon" onClick={toggleTheme}>
                             {theme === 'dark' ? Icons.sun : Icons.moon}
                         </button>
@@ -510,6 +534,8 @@ const ControlPanel = ({
                     background: var(--accent-hover);
                 }
             `}</style>
+
+            {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
         </>
     );
 };

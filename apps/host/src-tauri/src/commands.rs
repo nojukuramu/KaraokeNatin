@@ -1,6 +1,6 @@
 use crate::room_state::{RoomStateManager, Song, PlayerStatus};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 /// Client command types (from P2P protocol)
@@ -254,6 +254,61 @@ pub fn update_player_state(
         .map_err(|e| e.to_string())?;
     
     Ok(())
+}
+
+/// Open the logs folder in the system file explorer
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+
+    // Ensure the log directory exists before attempting to open it
+    std::fs::create_dir_all(&log_dir).map_err(|e| {
+        format!("Failed to create log directory {:?}: {}", log_dir, e)
+    })?;
+
+    open_path(log_dir)
+}
+
+/// Open the GitHub issue report page
+#[tauri::command]
+pub fn report_issue() -> Result<(), String> {
+    let url = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
+    open_path(url)
+}
+
+/// Helper function to open a path or URL in the default application
+fn open_path<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Unsupported operating system".to_string())
+    }
 }
 
 /// Response types

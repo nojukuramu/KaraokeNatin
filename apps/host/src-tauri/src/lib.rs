@@ -55,13 +55,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(room_manager)
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                    .max_file_size(10 * 1024 * 1024) // 10MB
+                    .build(),
+            )?;
 
             // Start embedded web server in background (with its own Tokio runtime)
             std::thread::spawn(|| {
@@ -197,6 +197,8 @@ pub fn run() {
             commands::search_youtube,
             commands::process_command,
             commands::update_player_state,
+            commands::open_log_folder,
+            commands::report_issue,
         ])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
