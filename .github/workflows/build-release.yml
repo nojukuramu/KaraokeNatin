@@ -41,6 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build frontend
+        run: |
+          cd apps/host
+          npm run build
+
       - name: Build Windows app
         run: |
           cd apps/host
@@ -100,6 +105,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      - name: Build frontend
+        run: |
+          cd apps/host
+          npm run build
 
       - name: Install Rust Android targets
         run: |
