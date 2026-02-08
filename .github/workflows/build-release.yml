@@ -30,6 +30,19 @@ jobs:
         with:
           version: 8
 
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -38,27 +51,25 @@ jobs:
         with:
           workspaces: './apps/host/src-tauri -> target'
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install all dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
-        run: |
-          cd packages/shared
-          npm run build
+        run: pnpm --filter @karaokenatin/shared run build
 
-      - name: Build frontend
-        run: |
-          cd apps/host
-          npm run build
+      - name: Build host frontend
+        run: pnpm --filter @karaokenatin/host run build
 
-      - name: Verify dist folder exists
-        run: dir apps/host/dist
-        shell: cmd
-
-      - name: Build Windows app
+      - name: Verify build artifacts
         run: |
-          cd apps/host
-          npm run tauri build
+          echo "Checking packages/shared/dist:"
+          Get-ChildItem -Path packages/shared/dist -ErrorAction SilentlyContinue
+          echo "Checking apps/host/dist:"
+          Get-ChildItem -Path apps/host/dist -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      - name: Build Windows Tauri app
+        run: pnpm --filter @karaokenatin/host run tauri:build
 
       - name: Upload Windows NSIS installer
         uses: actions/upload-artifact@v4
@@ -90,6 +101,19 @@ jobs:
         with:
           version: 8
 
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -99,47 +123,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK
-        run: |
-          sdkmanager "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './apps/host/src-tauri -> target'
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Build shared package
-        run: |
-          cd packages/shared
-          npm run build
-          echo "Shared package built successfully"
-          ls -la dist
-
-      - name: Build frontend
-        run: |
-          cd apps/host
-          echo "Building frontend..."
-          npm run build
-          echo "Frontend build completed"
-
-      - name: Verify dist folder exists
-        run: |
-          echo "Checking for dist folder..."
-          ls -la apps/host/
-          echo "Contents of dist folder:"
-          ls -la apps/host/dist || echo "dist folder not found!"
-          echo "Current working directory:"
-          pwd
-          echo "Full path check:"
-          test -d apps/host/dist && echo "dist exists" || echo "dist does NOT exist"
-
       - name: Install Rust Android targets
         run: |
           rustup target add aarch64-linux-android
@@ -147,24 +130,61 @@ jobs:
           rustup target add i686-linux-android
           rustup target add x86_64-linux-android
 
-      - name: Initialize Android project
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
         run: |
-          cd apps/host
-          npm run tauri android init -- --skip-targets-install
+          sdkmanager "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './apps/host/src-tauri -> target'
+
+      - name: Install all dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @karaokenatin/shared run build
+
+      - name: Build host frontend
+        run: pnpm --filter @karaokenatin/host run build
+
+      - name: Verify build artifacts
+        run: |
+          echo "=== Checking packages/shared/dist ==="
+          ls -la packages/shared/dist || echo "shared dist not found"
+          echo "=== Checking apps/host/dist ==="
+          ls -la apps/host/dist || echo "host dist not found"
+          echo "=== Full apps/host directory ==="
+          ls -la apps/host/
+
+      - name: Initialize Android project
+        working-directory: apps/host
+        run: npx tauri android init --skip-targets-install
 
       - name: Build Android APK
-        run: |
-          cd apps/host
-          npm run tauri android build
+        working-directory: apps/host
+        run: npx tauri android build
 
-      - name: Upload Android APK (arm64-v8a)
+      - name: Find APK files
+        run: |
+          echo "=== Looking for APK files ==="
+          find apps/host/src-tauri/gen -name "*.apk" 2>/dev/null || echo "No APKs found yet"
+
+      - name: Upload Android APK (universal)
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-arm64
+          name: android-apk-universal
           path: apps/host/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          if-no-files-found: warn
 
       - name: Upload all Android APKs
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-all
           path: apps/host/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
