@@ -41,10 +41,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build shared package
+        run: |
+          cd packages/shared
+          npm run build
+
       - name: Build frontend
         run: |
           cd apps/host
           npm run build
+
+      - name: Verify dist folder exists
+        run: |
+          dir apps/host/dist
+        shell: cmd
 
       - name: Build Windows app
         run: |
@@ -106,10 +116,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build shared package
+        run: |
+          cd packages/shared
+          npm run build
+
       - name: Build frontend
         run: |
           cd apps/host
           npm run build
+
+      - name: Verify dist folder exists
+        run: ls -la apps/host/dist
 
       - name: Install Rust Android targets
         run: |
