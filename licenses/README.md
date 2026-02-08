@@ -2,27 +2,19 @@
 
 This directory contains license files for third-party software used in KaraokeNatin.
 
-## yt-dlp
+## rusty_ytdl
 
-KaraokeNatin uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube video integration and search functionality.
+KaraokeNatin uses [rusty_ytdl](https://github.com/Mithronn/rusty_ytdl) for YouTube video search and metadata fetching. This is a pure Rust library — no external binaries are required.
 
-### License Files
+### License
 
-- **yt-dlp-LICENSE.txt**: The Unlicense license for yt-dlp core (public domain)
-- **yt-dlp-THIRD_PARTY_LICENSES.txt**: Third-party licenses for components bundled with yt-dlp executables
-
-### Important Notes
-
-- The yt-dlp core project is released into the public domain under The Unlicense
-- The PyInstaller-bundled Windows executables (`.exe` files) include third-party components under various licenses, most notably:
-  - Python (PSF-2.0)
-  - Various Python packages (MIT, BSD, Apache-2.0, GPLv2+, GPLv3+, etc.)
-  
-Since this project distributes the Windows executable of yt-dlp, the combined work falls under GPLv3+ licensing for that executable.
+- **rusty_ytdl**: Licensed under the MIT License
 
 ### More Information
 
 For the most up-to-date license information, please visit:
-- yt-dlp GitHub: https://github.com/yt-dlp/yt-dlp
-- yt-dlp License: https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE
-- yt-dlp Third-Party Licenses: https://github.com/yt-dlp/yt-dlp/blob/master/THIRD_PARTY_LICENSES.txt
+- rusty_ytdl GitHub: https://github.com/Mithronn/rusty_ytdl
+
+## Legacy Note
+
+Previous versions of KaraokeNatin used yt-dlp (a Python-based CLI tool) for YouTube integration. This has been fully replaced by rusty_ytdl for cross-platform compatibility (Windows, macOS, Linux, Android). The old yt-dlp license files are retained for historical reference only.

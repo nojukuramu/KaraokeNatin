@@ -1,5 +1,6 @@
 import { Song } from '@karaokenatin/shared';
 import { invoke } from '@tauri-apps/api/core';
+import { useFocusable, FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 
 interface QueueProps {
     songs: Song[];
@@ -25,7 +26,34 @@ const Icons = {
     ),
 };
 
+/** Focusable queue action button for DPAD navigation */
+const QueueActionButton = ({ children, onClick, disabled, className, title }: {
+    children: React.ReactNode;
+    onClick: () => void;
+    disabled?: boolean;
+    className?: string;
+    title?: string;
+}) => {
+    const { ref, focused } = useFocusable({
+        onEnterPress: () => { if (!disabled) onClick(); },
+    });
+    return (
+        <button
+            ref={ref}
+            className={`queue-action-btn ${className || ''} ${focused ? 'dpad-focused' : ''}`}
+            onClick={onClick}
+            disabled={disabled}
+            title={title}
+            tabIndex={0}
+        >
+            {children}
+        </button>
+    );
+};
+
 const Queue = ({ songs }: QueueProps) => {
+    const { ref, focusKey } = useFocusable();
+
     const handleMoveUp = async (songId: string) => {
         try {
             await invoke('process_command', {
@@ -69,58 +97,58 @@ const Queue = ({ songs }: QueueProps) => {
     }
 
     return (
-        <div className="queue-display">
-            <h2 className="queue-header">
-                Up Next <span className="queue-count">{songs.length}</span>
-            </h2>
+        <FocusContext.Provider value={focusKey}>
+            <div ref={ref} className="queue-display">
+                <h2 className="queue-header">
+                    Up Next <span className="queue-count">{songs.length}</span>
+                </h2>
 
-            <div className="queue-list">
-                {songs.map((song, index) => (
-                    <div key={song.id} className="queue-item-compact">
-                        <div className="queue-number">{index + 1}</div>
+                <div className="queue-list">
+                    {songs.map((song, index) => (
+                        <div key={song.id} className="queue-item-compact">
+                            <div className="queue-number">{index + 1}</div>
 
-                        <img
-                            src={song.thumbnailUrl}
-                            alt={song.title}
-                            className="queue-thumb-compact"
-                        />
+                            <img
+                                src={song.thumbnailUrl}
+                                alt={song.title}
+                                className="queue-thumb-compact"
+                            />
 
-                        <div className="queue-info-compact">
-                            <div className="queue-title-compact">{song.title}</div>
-                            <div className="queue-meta-compact">
-                                {song.addedBy} • {formatDuration(song.duration)}
+                            <div className="queue-info-compact">
+                                <div className="queue-title-compact">{song.title}</div>
+                                <div className="queue-meta-compact">
+                                    {song.addedBy} • {formatDuration(song.duration)}
+                                </div>
+                            </div>
+
+                            <div className="queue-actions">
+                                <QueueActionButton
+                                    onClick={() => handleMoveUp(song.id)}
+                                    disabled={index === 0}
+                                    title="Move up"
+                                >
+                                    {Icons.chevronUp}
+                                </QueueActionButton>
+                                <QueueActionButton
+                                    onClick={() => handleMoveDown(song.id)}
+                                    disabled={index === songs.length - 1}
+                                    title="Move down"
+                                >
+                                    {Icons.chevronDown}
+                                </QueueActionButton>
+                                <QueueActionButton
+                                    className="queue-action-btn-danger"
+                                    onClick={() => handleRemove(song.id)}
+                                    title="Remove"
+                                >
+                                    {Icons.trash}
+                                </QueueActionButton>
                             </div>
                         </div>
-
-                        <div className="queue-actions">
-                            <button
-                                className="queue-action-btn"
-                                onClick={() => handleMoveUp(song.id)}
-                                disabled={index === 0}
-                                title="Move up"
-                            >
-                                {Icons.chevronUp}
-                            </button>
-                            <button
-                                className="queue-action-btn"
-                                onClick={() => handleMoveDown(song.id)}
-                                disabled={index === songs.length - 1}
-                                title="Move down"
-                            >
-                                {Icons.chevronDown}
-                            </button>
-                            <button
-                                className="queue-action-btn queue-action-btn-danger"
-                                onClick={() => handleRemove(song.id)}
-                                title="Remove"
-                            >
-                                {Icons.trash}
-                            </button>
-                        </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
-        </div>
+        </FocusContext.Provider>
     );
 };
 

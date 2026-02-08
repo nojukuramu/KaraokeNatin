@@ -17,7 +17,8 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 - 🔐 **Simple Connection**: Just scan a QR code to join - no complicated setup
 
 ### For Hosts
-- 🖥️ **Desktop Display**: Full-screen karaoke player perfect for TVs and projectors  
+- 🖥️ **Desktop & Mobile Display**: Full-screen karaoke player for TVs, projectors, tablets, and phones
+- 📺 **Android TV Support**: DPAD navigation for big-screen Android TV experience
 - 🎬 **YouTube Integration**: Play any karaoke video directly from YouTube
 - 🔄 **Automatic Queue Management**: Songs automatically advance when finished
 - 📡 **Local Network**: Works over Wi-Fi - no internet required once songs are loaded
@@ -62,10 +63,7 @@ This means you're free to use, modify, and distribute this software for personal
 
 ### Third-Party Licenses
 
-KaraokeNatin uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube video integration. The yt-dlp project and its bundled dependencies are subject to their respective licenses:
-
-- **yt-dlp core**: Licensed under [The Unlicense](licenses/yt-dlp-LICENSE.txt) (public domain)
-- **yt-dlp Windows executable**: The bundled Windows executable includes third-party components under various licenses including GPLv3+. See [yt-dlp Third-Party Licenses](licenses/yt-dlp-THIRD_PARTY_LICENSES.txt) for complete details.
+KaraokeNatin uses [rusty_ytdl](https://github.com/Mithronn/rusty_ytdl) (a pure Rust YouTube integration library) for video search and metadata. It is licensed under the MIT License.
 
 For full license texts and attribution details, please refer to the files in the [licenses](licenses/) directory.
 

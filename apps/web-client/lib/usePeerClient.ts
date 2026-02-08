@@ -4,9 +4,9 @@ import { io, Socket } from 'socket.io-client';
 import { ClientCommand, HostBroadcast, isHostBroadcast } from '@karaokenatin/shared';
 import { useRoomStore, useCommandStore } from './useRoomState';
 
-const SIGNALING_SERVER_URL = 'http://localhost:3001';
+const DEFAULT_SIGNALING_URL = 'http://localhost:3001';
 
-export function usePeerClient(roomId: string, joinToken: string) {
+export function usePeerClient(roomId: string, joinToken: string, signalingUrl?: string) {
     const [peer, setPeer] = useState<Peer | null>(null);
     const connectionRef = useRef<DataConnection | null>(null);
     const [isConnected, setIsConnected] = useState(false);
@@ -45,7 +45,7 @@ export function usePeerClient(roomId: string, joinToken: string) {
             console.log('[PeerClient] Peer ID:', peerId);
 
             // Connect to signaling server
-            const socketInstance = io(SIGNALING_SERVER_URL);
+            const socketInstance = io(signalingUrl || DEFAULT_SIGNALING_URL);
 
             socketInstance.emit('JOIN_ROOM', { roomId, joinToken, displayName });
 

@@ -1,9 +1,9 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
 import { usePeerClient } from '@/lib/usePeerClient';
-import { usePlayerState, useCurrentSong, useQueue, usePlaylist } from '@/lib/useRoomState';
+import { usePlayerState, useCurrentSong, useQueue, usePlaylists } from '@/lib/useRoomState';
 import Controls from '@/components/Controls';
 import NowPlaying from '@/components/NowPlaying';
 import QueueDisplay from '@/components/QueueDisplay';
@@ -14,25 +14,32 @@ const DISPLAY_NAME_KEY = 'karaokenatin_display_name';
 
 export default function RoomPage() {
     const params = useParams();
-    const searchParams = useSearchParams();
     const roomId = params.id as string;
-    const joinToken = searchParams.get('t') || '';
+    const [joinToken] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return new URLSearchParams(window.location.search).get('t') || '';
+        }
+        return '';
+    });
+    const [signalingUrl] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return new URLSearchParams(window.location.search).get('s') || '';
+        }
+        return '';
+    });
 
-    const { connect, isConnected, sendCommand } = usePeerClient(roomId, joinToken);
+    const { connect, isConnected, sendCommand } = usePeerClient(roomId, joinToken, signalingUrl || undefined);
     const playerState = usePlayerState();
     const currentSong = useCurrentSong();
     const queue = useQueue();
-    const playlist = usePlaylist();
-    const [displayName, setDisplayName] = useState('');
-    const [hasJoined, setHasJoined] = useState(false);
-
-    // Load saved display name on mount
-    useEffect(() => {
-        const savedName = localStorage.getItem(DISPLAY_NAME_KEY);
-        if (savedName) {
-            setDisplayName(savedName);
+    const playlists = usePlaylists();
+    const [displayName, setDisplayName] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem(DISPLAY_NAME_KEY) || '';
         }
-    }, []);
+        return '';
+    });
+    const [hasJoined, setHasJoined] = useState(false);
 
     const handleJoin = (e: React.FormEvent) => {
         e.preventDefault();
@@ -100,7 +107,7 @@ export default function RoomPage() {
 
                 <QueueDisplay songs={queue} />
 
-                <Playlist songs={playlist} />
+                <Playlist collections={playlists} />
             </div>
         </div>
     );

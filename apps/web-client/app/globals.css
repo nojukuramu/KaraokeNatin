@@ -21,7 +21,7 @@ body {
     }
 
     .btn-primary {
-        @apply bg-gradient-to-r from-primary-500 to-secondary-500 text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-transform hover:scale-105 active:scale-95;
+        @apply bg-gradient-to-r from-primary-500 to-secondary-500 text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-transform hover:scale-105 active:scale-95 disabled:hover:scale-100 disabled:active:scale-100;
     }
 
     .btn-secondary {

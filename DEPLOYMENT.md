@@ -22,6 +22,37 @@ pnpm tauri build
 
 ---
 
+### 2. 📱 Android Application (Host - Phone & TV)
+**For**: Android phone/tablet host or Android TV
+
+**Prerequisites**:
+- Android Studio with SDK 24+ installed
+- Android NDK installed
+- Java 17+
+- Run `npx tauri android init` once to scaffold the Android project
+
+**Build Commands**:
+```powershell
+cd C:\Users\Noju\Projects\KaraokeNatin\apps\host
+
+# Debug APK
+pnpm tauri android build --debug
+
+# Release APK/AAB
+pnpm tauri android build
+```
+
+**Output**:
+- Debug APK: `src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk`
+- Release AAB: `src-tauri/gen/android/app/build/outputs/bundle/release/app-release.aab`
+
+**Distribution**:
+- Share the `.apk` for sideloading on phones/tablets
+- Upload the `.aab` to Google Play Store
+- For Android TV: ensure leanback launcher support in AndroidManifest
+
+---
+
 ### 2. 📱 Web Client (Remote Control Website)
 **For**: Karaoke singers accessing from their phones
 
@@ -190,7 +221,8 @@ Then rebuild the desktop app.
 
 | Component | Type | Where to Deploy | Cost |
 |-----------|------|-----------------|------|
-| **Desktop App** | Installer | User's PC | Free |
+| **Desktop App** | Installer | User's PC (Windows/macOS/Linux) | Free |
+| **Android App** | APK/AAB | Phone/Tablet/Android TV | Free |
 | **Web Client** | Website | Vercel/Netlify | Free |
 | **Signaling Server** | Backend | Railway/Heroku | Free Tier |
 

@@ -21,7 +21,13 @@ const QRDisplay = ({ url, roomId: _roomId }: QRDisplayProps) => {
                 setLoading(false);
             } catch (error) {
                 console.error('Failed to get QR URL:', error);
-                setDisplayUrl(url || 'http://localhost:8080');
+                // Use dynamic port from backend, avoid hardcoded port
+                try {
+                    const port = await invoke<number>('get_server_port');
+                    setDisplayUrl(url || `http://localhost:${port}`);
+                } catch {
+                    setDisplayUrl(url || window.location.origin);
+                }
                 setLoading(false);
             }
         };

@@ -7,12 +7,15 @@ use axum::{
 use tower_http::cors::{CorsLayer, Any};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::time::Duration;
+use socketioxide::SocketIo;
+use crate::signaling::{RoomManager, on_connect};
 
 /// The embedded remote control UI HTML
 const REMOTE_UI_HTML: &str = include_str!("../remote-ui/index.html");
 
 /// Store the actual port being used (for QR code generation)
-static ACTUAL_PORT: AtomicU16 = AtomicU16::new(8080);
+static ACTUAL_PORT: AtomicU16 = AtomicU16::new(0);
 
 /// Get the current server port
 pub fn get_server_port() -> u16 {
@@ -26,44 +29,55 @@ async fn is_port_available(port: u16) -> bool {
         .is_ok()
 }
 
-/// Find an available port starting from the preferred port
-async fn find_available_port(preferred: u16) -> u16 {
-    // Try preferred port first
-    if is_port_available(preferred).await {
-        return preferred;
-    }
-    
-    // Try a range of ports
-    for port in (preferred + 1)..=(preferred + 100) {
+/// Find an available port using random selection in the ephemeral range
+async fn find_available_port() -> u16 {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    // Try random ports in the IANA ephemeral range (49152–65535)
+    for _ in 0..20 {
+        let port = rng.gen_range(49152..=65535);
         if is_port_available(port).await {
-            log::info!("[WebServer] Port {} in use, using {} instead", preferred, port);
             return port;
         }
     }
-    
-    // Fallback to OS-assigned port (0)
-    log::warn!("[WebServer] No ports available in range, using OS-assigned port");
+
+    // Fallback to OS-assigned port
+    log::warn!("[WebServer] No random ports available, using OS-assigned port");
     0
 }
 
 /// Start the embedded web server
 pub async fn start_web_server() -> Result<(), String> {
-    let port = find_available_port(8080).await;
+    let port = find_available_port().await;
     
     log::info!("[WebServer] Starting embedded web server on port {}", port);
 
-    // Create router
+    // Initialize Socket.io with connection limits
+    let (layer, io) = SocketIo::builder()
+        .with_state(RoomManager::new())
+        .ping_interval(Duration::from_secs(25))
+        .ping_timeout(Duration::from_secs(20))
+        .max_buffer_size(128)
+        .build_layer();
+
+    io.ns("/", on_connect);
+
+    // Create router with timeout and concurrency limits
     let app = Router::new()
         // Serve the remote control UI
         .route("/", get(serve_index))
         .route("/health", get(health_check))
+        .layer(layer) // Socket.io layer
         // Add CORS for local development
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
                 .allow_headers(Any),
-        );
+        )
+        // Limit concurrent connections to prevent resource exhaustion
+        .layer(tower::limit::ConcurrencyLimitLayer::new(64));
 
     // Bind to all network interfaces
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

@@ -30,6 +30,27 @@ export interface ConnectedClient {
     connectedAt: number;
 }
 
+export type CollectionVisibility = 'public' | 'personal';
+
+export interface PlaylistCollection {
+    id: string;
+    name: string;
+    visibility: CollectionVisibility;
+    songs: Song[];
+    createdAt: number;
+    updatedAt: number;
+}
+
+/** Portable format for sharing collections */
+export interface ExportedCollection {
+    karaokenatin: string;  // version, e.g. "1.0"
+    collection: {
+        name: string;
+        visibility: CollectionVisibility;
+        songs: Song[];
+    };
+}
+
 export interface RoomState {
     roomId: string;
     hostPeerId: string;
@@ -43,8 +64,8 @@ export interface RoomState {
     // Queue state
     queue: Song[];
 
-    // Playlist state (shared song list independent of queue)
-    playlist: Song[];
+    // Playlist collections (replaces flat playlist)
+    playlists: PlaylistCollection[];
 
     // Metadata
     createdAt: number;
@@ -69,7 +90,7 @@ export function createInitialRoomState(roomId: string, hostPeerId: string): Room
             isMuted: false,
         },
         queue: [],
-        playlist: [],
+        playlists: [],
         createdAt: now,
         updatedAt: now,
     };

@@ -1,7 +1,11 @@
-use crate::room_state::{RoomStateManager, Song, PlayerStatus};
+use crate::room_state::{RoomStateManager, PlaylistStore, Song, PlaylistCollection, PlayerStatus, CollectionVisibility};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
+
+/// Guard so start_host_server is idempotent
+static SERVER_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Client command types (from P2P protocol)
 #[derive(Debug, Clone, Deserialize)]
@@ -48,21 +52,54 @@ pub enum ClientCommand {
     },
     SET_DISPLAY_NAME { name: String },
     PING,
-    // Playlist commands
+    // Collection-based playlist commands
     PLAYLIST_ADD {
         #[serde(rename = "youtubeUrl")]
         youtube_url: String,
+        #[serde(rename = "collectionId")]
+        collection_id: String,
         #[serde(rename = "addedBy")]
         added_by: Option<String>,
     },
     PLAYLIST_REMOVE {
         #[serde(rename = "songId")]
         song_id: String,
+        #[serde(rename = "collectionId")]
+        collection_id: String,
     },
     PLAYLIST_TO_QUEUE {
         #[serde(rename = "songId")]
         song_id: String,
+        #[serde(rename = "collectionId")]
+        collection_id: String,
     },
+    // Collection management commands
+    CREATE_COLLECTION {
+        name: String,
+        #[serde(default = "default_public_visibility")]
+        visibility: CollectionVisibility,
+    },
+    DELETE_COLLECTION {
+        #[serde(rename = "collectionId")]
+        collection_id: String,
+    },
+    RENAME_COLLECTION {
+        #[serde(rename = "collectionId")]
+        collection_id: String,
+        name: String,
+    },
+    SET_COLLECTION_VISIBILITY {
+        #[serde(rename = "collectionId")]
+        collection_id: String,
+        visibility: CollectionVisibility,
+    },
+    IMPORT_COLLECTION {
+        data: String,
+    },
+}
+
+fn default_public_visibility() -> CollectionVisibility {
+    CollectionVisibility::Public
 }
 
 /// Create a new room
@@ -86,6 +123,12 @@ pub fn get_qr_url() -> Result<String, String> {
     crate::network::generate_qr_url()
 }
 
+/// Get the web server port
+#[tauri::command]
+pub fn get_server_port() -> u16 {
+    crate::web_server::get_server_port()
+}
+
 /// Get the current room state
 #[tauri::command]
 pub fn get_room_state(state: tauri::State<RoomStateManager>) -> Result<crate::room_state::RoomState, String> {
@@ -104,6 +147,7 @@ pub async fn search_youtube(query: String, limit: Option<u32>) -> Result<Vec<cra
 pub async fn process_command(
     command: ClientCommand,
     state: tauri::State<'_, RoomStateManager>,
+    playlists: tauri::State<'_, PlaylistStore>,
     app: AppHandle,
 ) -> Result<(), String> {
     log::info!("Processing command: {:?}", command);
@@ -128,12 +172,10 @@ pub async fn process_command(
             state.write().toggle_mute();
         }
         ClientCommand::ADD_SONG { youtube_url, added_by } => {
-            // Extract YouTube ID from URL
             let youtube_id = extract_youtube_id(&youtube_url)
                 .ok_or_else(|| "Invalid YouTube URL".to_string())?;
             
-            // Fetch metadata using yt-dlp
-            match crate::sidecar::fetch_metadata(&youtube_id).await {
+            match crate::metadata::fetch_metadata(&youtube_id).await {
                 Ok(metadata) => {
                     let song = Song {
                         id: Uuid::new_v4().to_string(),
@@ -176,19 +218,15 @@ pub async fn process_command(
             }
         }
         ClientCommand::SET_DISPLAY_NAME { name } => {
-            // This would be handled differently - storing client metadata
             log::info!("Client set display name: {}", name);
         }
-        ClientCommand::PING => {
-            // Respond to ping - handled at protocol level
-        }
-        ClientCommand::PLAYLIST_ADD { youtube_url, added_by } => {
-            // Extract YouTube ID from URL
+        ClientCommand::PING => {}
+        // ---- playlist commands delegate to PlaylistStore ----
+        ClientCommand::PLAYLIST_ADD { youtube_url, collection_id, added_by } => {
             let youtube_id = extract_youtube_id(&youtube_url)
                 .ok_or_else(|| "Invalid YouTube URL".to_string())?;
             
-            // Fetch metadata using yt-dlp
-            match crate::sidecar::fetch_metadata(&youtube_id).await {
+            match crate::metadata::fetch_metadata(&youtube_id).await {
                 Ok(metadata) => {
                     let song = Song {
                         id: Uuid::new_v4().to_string(),
@@ -200,7 +238,16 @@ pub async fn process_command(
                         added_by: added_by.unwrap_or_else(|| "Guest".to_string()),
                         added_at: chrono::Utc::now().timestamp_millis(),
                     };
-                    state.write().add_to_playlist(song);
+                    let target_id = if collection_id.is_empty() {
+                        playlists.get_or_create_default_collection()
+                    } else {
+                        collection_id
+                    };
+                    if !playlists.add_to_collection(&target_id, song) {
+                        return Err("Collection not found".to_string());
+                    }
+                    // Sync snapshot into room state
+                    state.write().sync_playlists(playlists.get_all());
                 }
                 Err(e) => {
                     log::error!("Failed to fetch metadata: {}", e);
@@ -208,15 +255,45 @@ pub async fn process_command(
                 }
             }
         }
-        ClientCommand::PLAYLIST_REMOVE { song_id } => {
-            if !state.write().remove_from_playlist(&song_id) {
-                return Err("Song not found in playlist".to_string());
+        ClientCommand::PLAYLIST_REMOVE { song_id, collection_id } => {
+            if !playlists.remove_from_collection(&collection_id, &song_id) {
+                return Err("Song not found in collection".to_string());
+            }
+            state.write().sync_playlists(playlists.get_all());
+        }
+        ClientCommand::PLAYLIST_TO_QUEUE { song_id, collection_id } => {
+            if let Some(song) = playlists.clone_song_for_queue(&collection_id, &song_id) {
+                state.write().add_song(song);
+            } else {
+                return Err("Song not found in collection".to_string());
             }
         }
-        ClientCommand::PLAYLIST_TO_QUEUE { song_id } => {
-            if !state.write().playlist_to_queue(&song_id) {
-                return Err("Song not found in playlist".to_string());
+        ClientCommand::CREATE_COLLECTION { name, visibility } => {
+            playlists.create_collection(name, visibility);
+            state.write().sync_playlists(playlists.get_all());
+        }
+        ClientCommand::DELETE_COLLECTION { collection_id } => {
+            if !playlists.delete_collection(&collection_id) {
+                return Err("Collection not found".to_string());
             }
+            state.write().sync_playlists(playlists.get_all());
+        }
+        ClientCommand::RENAME_COLLECTION { collection_id, name } => {
+            if !playlists.rename_collection(&collection_id, name) {
+                return Err("Collection not found".to_string());
+            }
+            state.write().sync_playlists(playlists.get_all());
+        }
+        ClientCommand::SET_COLLECTION_VISIBILITY { collection_id, visibility } => {
+            if !playlists.set_collection_visibility(&collection_id, visibility) {
+                return Err("Collection not found".to_string());
+            }
+            state.write().sync_playlists(playlists.get_all());
+        }
+        ClientCommand::IMPORT_COLLECTION { data } => {
+            playlists.import_collection(&data)
+                .map_err(|e| format!("Import failed: {}", e))?;
+            state.write().sync_playlists(playlists.get_all());
         }
     }
     
@@ -256,59 +333,219 @@ pub fn update_player_state(
     Ok(())
 }
 
-/// Open the logs folder in the system file explorer
+/// Export a collection to JSON string
 #[tauri::command]
-pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
-    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
-
-    // Ensure the log directory exists before attempting to open it
-    std::fs::create_dir_all(&log_dir).map_err(|e| {
-        format!("Failed to create log directory {:?}: {}", log_dir, e)
-    })?;
-
-    open_path(log_dir)
+pub fn export_collection(collection_id: String, playlists: tauri::State<PlaylistStore>) -> Result<String, String> {
+    playlists.export_collection(&collection_id)
 }
 
-/// Open the GitHub issue report page
+// ============================================================
+// Standalone playlist commands (available in ALL modes)
+// ============================================================
+
+/// Get all playlists (for Guest Mode local playlists too)
 #[tauri::command]
-pub fn report_issue() -> Result<(), String> {
-    let url = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
-    open_path(url)
+pub fn get_playlists(playlists: tauri::State<PlaylistStore>) -> Vec<PlaylistCollection> {
+    playlists.get_all()
 }
 
-/// Helper function to open a path or URL in the default application
-fn open_path<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+/// Create a collection (standalone)
+#[tauri::command]
+pub fn playlist_create_collection(
+    name: String,
+    visibility: Option<String>,
+    playlists: tauri::State<PlaylistStore>,
+) -> String {
+    let vis = match visibility.as_deref() {
+        Some("personal") => CollectionVisibility::Personal,
+        _ => CollectionVisibility::Public,
+    };
+    playlists.create_collection(name, vis)
+}
+
+/// Delete a collection (standalone)
+#[tauri::command]
+pub fn playlist_delete_collection(
+    collection_id: String,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<(), String> {
+    if playlists.delete_collection(&collection_id) {
+        Ok(())
+    } else {
+        Err("Collection not found".into())
+    }
+}
+
+/// Rename a collection (standalone)
+#[tauri::command]
+pub fn playlist_rename_collection(
+    collection_id: String,
+    name: String,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<(), String> {
+    if playlists.rename_collection(&collection_id, name) {
+        Ok(())
+    } else {
+        Err("Collection not found".into())
+    }
+}
+
+/// Set collection visibility (standalone)
+#[tauri::command]
+pub fn playlist_set_visibility(
+    collection_id: String,
+    visibility: String,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<(), String> {
+    let vis = match visibility.as_str() {
+        "personal" => CollectionVisibility::Personal,
+        _ => CollectionVisibility::Public,
+    };
+    if playlists.set_collection_visibility(&collection_id, vis) {
+        Ok(())
+    } else {
+        Err("Collection not found".into())
+    }
+}
+
+/// Add a song to a collection (standalone, fetches metadata)
+#[tauri::command]
+pub async fn playlist_add_song(
+    youtube_url: String,
+    collection_id: String,
+    added_by: Option<String>,
+    playlists: tauri::State<'_, PlaylistStore>,
+) -> Result<(), String> {
+    let youtube_id = extract_youtube_id(&youtube_url)
+        .ok_or_else(|| "Invalid YouTube URL".to_string())?;
+    let metadata = crate::metadata::fetch_metadata(&youtube_id).await
+        .map_err(|e| format!("Failed to fetch metadata: {}", e))?;
+    let song = Song {
+        id: Uuid::new_v4().to_string(),
+        youtube_id,
+        title: metadata.title,
+        artist: metadata.artist,
+        duration: metadata.duration,
+        thumbnail_url: metadata.thumbnail_url,
+        added_by: added_by.unwrap_or_else(|| "Host".to_string()),
+        added_at: chrono::Utc::now().timestamp_millis(),
+    };
+    let target_id = if collection_id.is_empty() {
+        playlists.get_or_create_default_collection()
+    } else {
+        collection_id
+    };
+    if playlists.add_to_collection(&target_id, song) {
+        Ok(())
+    } else {
+        Err("Collection not found".into())
+    }
+}
+
+/// Remove a song from a collection (standalone)
+#[tauri::command]
+pub fn playlist_remove_song(
+    collection_id: String,
+    song_id: String,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<(), String> {
+    if playlists.remove_from_collection(&collection_id, &song_id) {
+        Ok(())
+    } else {
+        Err("Song not found in collection".into())
+    }
+}
+
+/// Import a collection from JSON string (standalone)
+#[tauri::command]
+pub fn playlist_import_collection(
+    data: String,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<String, String> {
+    playlists.import_collection(&data)
+}
+
+/// Save a collection to a file (using system file dialog)
+#[tauri::command]
+pub async fn save_collection_to_file(
+    collection_id: String,
+    playlists: tauri::State<'_, PlaylistStore>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let json = playlists.export_collection(&collection_id)?;
+    
+    // Get a suggested filename from collection name
+    let all = playlists.get_all();
+    let col_name = all.iter()
+        .find(|c| c.id == collection_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "playlist".to_string());
+    let safe_name = col_name.replace(|c: char| !c.is_alphanumeric() && c != ' ' && c != '-' && c != '_', "");
+    
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog()
+        .file()
+        .set_file_name(&format!("{}.karaoke.json", safe_name))
+        .add_filter("KaraokeNatin Playlist", &["karaoke.json", "json"])
+        .blocking_save_file();
+    
+    if let Some(file_path) = path {
+        std::fs::write(file_path.as_path().unwrap(), &json)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+        Ok(())
+    } else {
+        Err("Save cancelled".into())
+    }
+}
+
+/// Load a collection from a file (using system file dialog)
+#[tauri::command]
+pub async fn load_collection_from_file(
+    playlists: tauri::State<'_, PlaylistStore>,
+    app: AppHandle,
+) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog()
+        .file()
+        .add_filter("KaraokeNatin Playlist", &["karaoke.json", "json"])
+        .blocking_pick_file();
+    
+    if let Some(file_path) = path {
+        let data = std::fs::read_to_string(file_path.as_path().unwrap())
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        playlists.import_collection(&data)
+    } else {
+        Err("Open cancelled".into())
+    }
+}
+
+// ============================================================
+// Lazy host server start
+// ============================================================
+
+/// Start the web/signaling server (called when entering Host Mode)
+#[tauri::command]
+pub fn start_host_server() -> Result<u16, String> {
+    if SERVER_STARTED.swap(true, Ordering::SeqCst) {
+        // Already started — just return port
+        return Ok(crate::web_server::get_server_port());
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
+    std::thread::spawn(|| {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+        rt.block_on(async {
+            log::info!("[Tauri] Starting embedded web server...");
+            if let Err(e) = crate::web_server::start_web_server().await {
+                log::error!("[Tauri] Web server error: {}", e);
+            }
+        });
+    });
 
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    {
-        Err("Unsupported operating system".to_string())
-    }
+    // Wait for bind
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let port = crate::web_server::get_server_port();
+    log::info!("[Tauri] Web server (and signaling) on port {}", port);
+    Ok(port)
 }
 
 /// Response types

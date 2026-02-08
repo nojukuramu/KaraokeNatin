@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRoomState } from '../hooks/useRoomState';
 import { invoke } from '@tauri-apps/api/core';
+import { useFocusable, FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import ScoringOverlay from './ScoringOverlay';
 
 // YouTube IFrame API types
@@ -75,8 +76,9 @@ const generateScore = (): number => {
 
 const Player = () => {
     const playerRef = useRef<HTMLDivElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
     const ytPlayerRef = useRef<YouTubePlayer | null>(null);
+    const timePollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const { roomState } = useRoomState();
     const [isAPIReady, setIsAPIReady] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -84,6 +86,8 @@ const Player = () => {
     const [showScoring, setShowScoring] = useState(false);
     const [currentScore, setCurrentScore] = useState(0);
     const [lastSongTitle, setLastSongTitle] = useState('');
+
+    const { ref: focusRef, focusKey } = useFocusable();
 
 
     // Handle fullscreen change events
@@ -169,6 +173,10 @@ const Player = () => {
         }) as unknown as YouTubePlayer;
 
         return () => {
+            if (timePollingRef.current) {
+                clearInterval(timePollingRef.current);
+                timePollingRef.current = null;
+            }
             ytPlayerRef.current?.destroy();
             ytPlayerRef.current = null;
         };
@@ -226,8 +234,13 @@ const Player = () => {
 
     // Poll current time - throttle broadcasts to reduce network traffic
     const startTimePolling = () => {
+        // Clear any existing interval to prevent leaks
+        if (timePollingRef.current) {
+            clearInterval(timePollingRef.current);
+            timePollingRef.current = null;
+        }
         let lastBroadcastTime = 0;
-        setInterval(() => {
+        timePollingRef.current = setInterval(() => {
             if (ytPlayerRef.current) {
                 try {
                     const currentTime = ytPlayerRef.current.getCurrentTime();
@@ -357,58 +370,60 @@ const Player = () => {
 
     // Single render - container handles fullscreen
     return (
-        <div
-            ref={containerRef}
-            className="player-container"
-            style={isFullscreen ? {
-                width: '100vw',
-                height: '100vh',
-                background: '#000',
-                display: 'flex',
-                flexDirection: 'column'
-            } : undefined}
-        >
-            <button
-                className="btn-icon btn-fullscreen"
-                onClick={toggleFullscreen}
-                title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        <FocusContext.Provider value={focusKey}>
+            <div
+                ref={(node: HTMLDivElement | null) => {
+                    containerRef.current = node;
+                    if (focusRef && 'current' in focusRef) {
+                        (focusRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+                    }
+                }}
+                className="player-container"
                 style={isFullscreen ? {
-                    position: 'absolute',
-                    top: 16,
-                    right: 16,
-                    zIndex: 100
+                    width: '100vw',
+                    height: '100vh',
+                    background: '#000',
+                    display: 'flex',
+                    flexDirection: 'column'
                 } : undefined}
             >
-                {isFullscreen ? Icons.minimize : Icons.maximize}
-            </button>
+                <button
+                    className="btn-icon btn-fullscreen"
+                    onClick={toggleFullscreen}
+                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                    tabIndex={0}
+                    style={isFullscreen ? {
+                        position: 'absolute',
+                        top: 16,
+                        right: 16,
+                        zIndex: 100
+                    } : undefined}
+                >
+                    {isFullscreen ? Icons.minimize : Icons.maximize}
+                </button>
 
-            <div className="player-inner" style={isFullscreen ? { flex: 1 } : undefined}>
-                {playerContent}
-            </div>
-
-            {currentSong && !isFullscreen && (
-                <div style={{
-                    padding: '16px 20px',
-                    background: 'var(--bg-secondary)',
-                    borderTop: '1px solid var(--border)'
-                }}>
-                    <h3 style={{ fontSize: 18, fontWeight: 600 }}>
-                        {currentSong.title}
-                    </h3>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
-                        {currentSong.artist || 'Unknown Artist'} • Added by {currentSong.addedBy}
-                    </p>
+                <div className="player-inner" style={isFullscreen ? { flex: 1 } : undefined}>
+                    {playerContent}
                 </div>
-            )}
 
-            {showScoring && (
-                <ScoringOverlay
-                    score={currentScore}
-                    onComplete={handleScoringComplete}
-                    songTitle={lastSongTitle}
-                />
-            )}
-        </div>
+                {currentSong && !isFullscreen && (
+                    <div className="player-song-info">
+                        <h3 className="player-song-title">{currentSong.title}</h3>
+                        <p className="player-song-meta">
+                            {currentSong.artist || 'Unknown Artist'} • Added by {currentSong.addedBy}
+                        </p>
+                    </div>
+                )}
+
+                {showScoring && (
+                    <ScoringOverlay
+                        score={currentScore}
+                        onComplete={handleScoringComplete}
+                        songTitle={lastSongTitle}
+                    />
+                )}
+            </div>
+        </FocusContext.Provider>
     );
 };
 

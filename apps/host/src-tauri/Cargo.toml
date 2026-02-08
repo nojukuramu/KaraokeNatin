@@ -1,14 +1,12 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
+description = "KaraokeNatin - Karaoke party app with remote control"
+authors = ["KaraokeNatin"]
+license = "MIT"
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "app_lib"
@@ -30,7 +28,18 @@ sha2 = "0.10"
 hex = "0.4"
 chrono = "0.4"
 axum = "0.7"
-tower = "0.5"
+tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 local-ip-address = "0.6"
 dirs = "5"
+socketioxide = { version = "0.13", features = ["state"] }
+# Pure Rust YouTube integration - search + metadata, no external binaries needed
+rusty_ytdl = { version = "0.7", features = ["search"] }
+# Random port selection
+rand = "0.8"
+# Prevent multiple instances
+tauri-plugin-single-instance = "2"
+# File picker dialogs
+tauri-plugin-dialog = "2"
+# OpenSSL with vendored feature for cross-compilation
+openssl = { version = "0.10", features = ["vendored"] }
