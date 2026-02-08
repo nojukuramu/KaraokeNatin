@@ -119,14 +119,26 @@ jobs:
         run: |
           cd packages/shared
           npm run build
+          echo "Shared package built successfully"
+          ls -la dist
 
       - name: Build frontend
         run: |
           cd apps/host
+          echo "Building frontend..."
           npm run build
+          echo "Frontend build completed"
 
       - name: Verify dist folder exists
-        run: ls -la apps/host/dist
+        run: |
+          echo "Checking for dist folder..."
+          ls -la apps/host/
+          echo "Contents of dist folder:"
+          ls -la apps/host/dist || echo "dist folder not found!"
+          echo "Current working directory:"
+          pwd
+          echo "Full path check:"
+          test -d apps/host/dist && echo "dist exists" || echo "dist does NOT exist"
 
       - name: Install Rust Android targets
         run: |
