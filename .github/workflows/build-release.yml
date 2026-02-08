@@ -1,0 +1,131 @@
+name: Build Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (optional)'
+        required: false
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './apps/host/src-tauri -> target'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Windows app
+        run: |
+          cd apps/host
+          npm run tauri build
+
+      - name: Upload Windows NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis-installer
+          path: apps/host/src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload Windows MSI installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi-installer
+          path: apps/host/src-tauri/target/release/bundle/msi/*.msi
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './apps/host/src-tauri -> target'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Initialize Android project
+        run: |
+          cd apps/host
+          npm run tauri android init -- --skip-targets-install
+
+      - name: Build Android APK
+        run: |
+          cd apps/host
+          npm run tauri android build
+
+      - name: Upload Android APK (arm64-v8a)
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-arm64
+          path: apps/host/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+
+      - name: Upload all Android APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-all
+          path: apps/host/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
