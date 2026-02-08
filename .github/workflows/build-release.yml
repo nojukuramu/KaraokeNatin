@@ -52,8 +52,7 @@ jobs:
           npm run build
 
       - name: Verify dist folder exists
-        run: |
-          dir apps/host/dist
+        run: dir apps/host/dist
         shell: cmd
 
       - name: Build Windows app
