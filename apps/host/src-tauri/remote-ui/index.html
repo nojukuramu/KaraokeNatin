@@ -12,7 +12,14 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bg-hover) transparent;
         }
+        *::-webkit-scrollbar { width: 5px; height: 5px; }
+        *::-webkit-scrollbar-track { background: transparent; }
+        *::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 3px; }
+        *::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        *::-webkit-scrollbar-corner { background: transparent; }
 
         :root {
             /* Dark Mode (Default) */
@@ -945,6 +952,55 @@
         .retry-btn:hover {
             background: var(--bg-secondary);
         }
+        /* Playlist Web Remote Note */
+        .playlist-web-note {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--accent-light);
+            border: 1px solid rgba(29, 161, 242, 0.25);
+            border-radius: 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+
+        .playlist-web-note svg {
+            flex-shrink: 0;
+            color: var(--accent);
+            margin-top: 1px;
+        }
+
+        .playlist-web-note a {
+            color: var(--accent);
+            text-decoration: underline;
+            font-weight: 600;
+        }
+
+        .playlist-web-note a:hover {
+            color: var(--accent-hover);
+        }
+
+        /* YouTube Footer Disclaimer */
+        .yt-footer {
+            padding: 10px 16px;
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .yt-footer a {
+            color: var(--text-secondary);
+            text-decoration: underline;
+        }
+
+        .yt-footer a:hover {
+            color: var(--accent);
+        }
     </style>
 </head>
 
@@ -977,8 +1033,15 @@
             searching: false,
             isInputFocused: false,
             theme: window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
-            addedSongs: new Set(), // Track which songs have been added (for "Added!" feedback)
-            loadingActions: new Set() // Track which button actions are currently loading
+            addedSongs: new Set(),
+            loadingActions: new Set(),
+            activeCollectionIdx: 0,
+            // Reconnection tracking
+            reconnectAttempts: 0,
+            maxReconnectAttempts: 5,
+            reconnecting: false,
+            // InApp Remote mode (embedded in Tauri host app)
+            isInAppRemote: new URLSearchParams(window.location.search).get('mode') === 'inapp'
         };
 
         let socket = null;
@@ -1071,11 +1134,11 @@
                             id="username-input"
                             placeholder="Your name" 
                             value="${escapeHtml(state.username)}"
-                            oninput="state.username = this.value.trim(); render();"
+                            oninput="state.username = this.value; document.querySelector('.join-btn').disabled = !this.value.trim();"
                             maxlength="20"
                             required
                         >
-                        <button type="submit" class="join-btn" ${!state.username ? 'disabled' : ''}>
+                        <button type="submit" class="join-btn" ${!state.username.trim() ? 'disabled' : ''}>
                             Join Session
                         </button>
                     </form>
@@ -1087,7 +1150,7 @@
             return `
                 <div class="loading">
                     <div class="spinner"></div>
-                    <p>Connecting to host...</p>
+                    <p>${state.reconnecting ? `Reconnecting... (attempt ${state.reconnectAttempts})` : 'Connecting to host...'}</p>
                 </div>
             `;
         }
@@ -1099,8 +1162,8 @@
                         ${icons.music}
                     </div>
                     <h2 style="margin-bottom: 8px;">Connection Lost</h2>
-                    <p style="color: var(--text-secondary);">Could not connect to the host.</p>
-                    <button class="retry-btn" onclick="location.reload()">
+                    <p style="color: var(--text-secondary);">Could not connect to the host after ${state.maxReconnectAttempts} attempts.</p>
+                    <button class="retry-btn" onclick="reconnect()">
                         ${icons.refreshCw}
                         <span style="margin-left: 8px;">Retry</span>
                     </button>
@@ -1112,7 +1175,8 @@
             const rs = state.roomState || {};
             const currentSong = rs.player?.currentSong;
             const queue = rs.queue || [];
-            const playlist = rs.playlist || [];
+            const playlists = rs.playlists || [];
+            const totalPlaylistSongs = playlists.reduce((s, c) => s + (c.songs ? c.songs.length : 0), 0);
             const player = rs.player || {};
             const isPlaying = player.status === 'playing';
 
@@ -1126,15 +1190,17 @@
                         </div>
                     </div>
                     <div class="header-actions">
+                        ${!state.isInAppRemote ? `
                         <button class="icon-btn" onclick="showInviteQR()" title="Invite friends">
                             ${icons.userPlus}
-                        </button>
+                        </button>` : ''}
                         <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
                             ${state.theme === 'dark' ? icons.sun : icons.moon}
                         </button>
                     </div>
                 </header>
 
+                ${state.isInAppRemote ? '' : `
                 <nav class="nav-tabs">
                     <button class="nav-tab ${state.activeTab === 'playing' ? 'active' : ''}" onclick="setTab('playing')">
                         Playing${queue.length > 0 ? ` (${queue.length})` : ''}
@@ -1143,15 +1209,25 @@
                         Search
                     </button>
                     <button class="nav-tab ${state.activeTab === 'playlist' ? 'active' : ''}" onclick="setTab('playlist')">
-                        Playlist (${playlist.length})
+                        Playlist (${totalPlaylistSongs})
                     </button>
                 </nav>
+                `}
 
                 <main class="main">
-                    ${state.activeTab === 'playing' ? renderPlayingTab(currentSong, player, isPlaying) : ''}
-                    ${state.activeTab === 'search' ? renderSearchTab() : ''}
-                    ${state.activeTab === 'playlist' ? renderPlaylistTab(playlist) : ''}
+                    ${state.isInAppRemote
+                        ? renderPlayingTab(currentSong, player, isPlaying)
+                        : `
+                            ${state.activeTab === 'playing' ? renderPlayingTab(currentSong, player, isPlaying) : ''}
+                            ${state.activeTab === 'search' ? renderSearchTab() : ''}
+                            ${state.activeTab === 'playlist' ? renderPlaylistTab(playlists) : ''}
+                        `
+                    }
                 </main>
+
+                <footer class="yt-footer">
+                    Videos are played via YouTube embedding. All videos are subject to YouTube's <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">Terms of Service</a>.
+                </footer>
             `;
         }
 
@@ -1336,20 +1412,46 @@
             `;
         }
 
-        function renderPlaylistTab(playlist) {
-            if (playlist.length === 0) {
+        function renderPlaylistTab(playlists) {
+            const downloadNote = !state.isInAppRemote ? `
+                <div class="playlist-web-note">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    <span>Personal Playlists are not available in Web Remote. Download the app <a href="https://noju.pythonanywhere.com/karaokenatin/" target="_blank" rel="noopener">here</a>.</span>
+                </div>
+            ` : '';
+
+            if (playlists.length === 0) {
                 return `
+                    ${downloadNote}
                     <div class="empty-state">
                         <div class="empty-state-icon">${icons.music}</div>
-                        <p>Playlist is empty</p>
-                        <p style="font-size: 13px; margin-top: 8px;">Add songs to your playlist from search results</p>
+                        <p>No playlists available</p>
+                        <p style="font-size: 13px; margin-top: 8px;">Add songs to playlists from search results</p>
                     </div>
                 `;
             }
 
+            // Clamp active index
+            if (state.activeCollectionIdx >= playlists.length) state.activeCollectionIdx = 0;
+            const active = playlists[state.activeCollectionIdx];
+            const songs = active.songs || [];
+
             return `
+                ${downloadNote}
+                <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;">
+                    ${playlists.map((col, idx) => `
+                        <button class="btn-sm ${idx === state.activeCollectionIdx ? 'btn-primary' : 'btn-secondary'}" onclick="state.activeCollectionIdx=${idx};render();" style="white-space:nowrap;">
+                            ${col.visibility === 'public' ? '🌐' : '🔒'} ${escapeHtml(col.name)} (${(col.songs||[]).length})
+                        </button>
+                    `).join('')}
+                </div>
+                ${songs.length === 0 ? `
+                    <div class="empty-state">
+                        <p>No songs in "${escapeHtml(active.name)}"</p>
+                    </div>
+                ` : `
                 <section class="queue-list">
-                    ${playlist.map((song, i) => {
+                    ${songs.map((song, i) => {
                 const isP2QLoading = state.loadingActions.has('p2q_' + song.id);
                 const isRemoveLoading = state.loadingActions.has('rmpl_' + song.id);
                 return `
@@ -1361,16 +1463,17 @@
                                 <div class="queue-meta">${escapeHtml(song.artist || 'Unknown Artist')}</div>
                             </div>
                             <div class="queue-actions">
-                                <button class="btn-sm btn-primary${isP2QLoading ? ' loading' : ''}" onclick="playlistToQueue('${song.id}')" title="Add to queue" ${isP2QLoading ? 'disabled' : ''}>
+                                <button class="btn-sm btn-primary${isP2QLoading ? ' loading' : ''}" onclick="playlistToQueue('${active.id}','${song.id}')" title="Add to queue" ${isP2QLoading ? 'disabled' : ''}>
                                     ${isP2QLoading ? icons.spinnerSmall : icons.plus} Queue
                                 </button>
-                                <button class="queue-action-btn delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromPlaylist('${song.id}')" title="Remove from playlist" ${isRemoveLoading ? 'disabled' : ''}>
+                                <button class="queue-action-btn delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromPlaylist('${active.id}','${song.id}')" title="Remove from playlist" ${isRemoveLoading ? 'disabled' : ''}>
                                     ${isRemoveLoading ? icons.spinnerSmall : icons.trash}
                                 </button>
                             </div>
                         </div>
                     `}).join('')}
                 </section>
+                `}
             `;
         }
 
@@ -1417,28 +1520,32 @@
         }
 
         function addToPlaylist(url) {
+            // Use active collection or first available
+            const rs = state.roomState || {};
+            const playlists = rs.playlists || [];
+            const collectionId = playlists.length > 0 ? playlists[state.activeCollectionIdx || 0].id : null;
+            if (!collectionId) { showToast('No playlist available', 'error'); return; }
             const actionKey = `playlist_${url}`;
-            if (state.loadingActions.has(actionKey)) return; // Prevent double-click
+            if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
-            sendCommand({ type: 'PLAYLIST_ADD', youtubeUrl: url, addedBy: state.username });
-            // Loading state will be cleared on STATE_UPDATE
+            sendCommand({ type: 'PLAYLIST_ADD', youtubeUrl: url, addedBy: state.username, collectionId: collectionId });
         }
 
-        function playlistToQueue(songId) {
+        function playlistToQueue(collectionId, songId) {
             const actionKey = `p2q_${songId}`;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
-            sendCommand({ type: 'PLAYLIST_TO_QUEUE', songId: songId });
+            sendCommand({ type: 'PLAYLIST_TO_QUEUE', songId: songId, collectionId: collectionId });
         }
 
-        function removeFromPlaylist(songId) {
+        function removeFromPlaylist(collectionId, songId) {
             const actionKey = `rmpl_${songId}`;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
-            sendCommand({ type: 'PLAYLIST_REMOVE', songId: songId });
+            sendCommand({ type: 'PLAYLIST_REMOVE', songId: songId, collectionId: collectionId });
         }
 
         function openInYouTube(url) {
@@ -1565,15 +1672,109 @@
             modalCallback = null;
         }
 
-        // Connection
-        function initConnection() {
-            // Signaling server runs on the same port as the web server
-            const signalingUrl = window.location.origin;
-            console.log('[Remote] Connecting to:', signalingUrl);
+        // ── Connection Management ──
+        // Uses an "attempt ID" to prevent stale callbacks from interfering
+        // with a newer connection attempt.  Every call to startConnection()
+        // bumps the counter; any callback whose captured id no longer matches
+        // the current one is silently ignored.
 
-            socket = io(signalingUrl);
+        let reconnectTimer = null;
+        let connectionAttemptId = 0;   // monotonically increasing
+        let isConnecting = false;      // guard against overlapping attempts
+
+        function cleanup() {
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            // Detach event handlers first to prevent stale events during teardown
+            if (dataConn) {
+                try { dataConn.removeAllListeners(); dataConn.close(); } catch(e) {}
+                dataConn = null;
+            }
+            if (peer) {
+                try { peer.removeAllListeners(); peer.destroy(); } catch(e) {}
+                peer = null;
+            }
+            if (socket) {
+                try { socket.removeAllListeners(); socket.disconnect(); } catch(e) {}
+                socket = null;
+            }
+            isConnecting = false;
+        }
+
+        /**
+         * Full reset — user-initiated retry from the "disconnected" screen.
+         */
+        function reconnect() {
+            cleanup();
+            state.reconnectAttempts = 0;
+            state.reconnecting = false;
+            startConnection();
+        }
+
+        /**
+         * Schedule an automatic reconnection with exponential back-off.
+         * Guards against duplicate calls so only one timer is ever running.
+         */
+        function scheduleReconnect() {
+            // Already waiting for a reconnect timer — skip duplicate
+            if (reconnectTimer) {
+                console.log('[Remote] Reconnect already scheduled, skipping duplicate');
+                return;
+            }
+
+            cleanup();
+
+            if (state.reconnectAttempts >= state.maxReconnectAttempts) {
+                state.screen = 'disconnected';
+                state.reconnecting = false;
+                render();
+                return;
+            }
+
+            state.reconnectAttempts++;
+            state.reconnecting = true;
+            state.screen = 'loading';
+            render();
+
+            // Exponential back-off: 1 s → 2 s → 4 s → 8 s → 15 s (cap)
+            const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts - 1), 15000);
+            console.log('[Remote] Reconnecting in ' + delay + 'ms (attempt ' + state.reconnectAttempts + '/' + state.maxReconnectAttempts + ')');
+
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                startConnection();
+            }, delay);
+        }
+
+        /**
+         * Initiate a brand-new connection attempt.
+         * Bumps the attempt ID so any lingering callbacks from a previous
+         * attempt become no-ops.
+         */
+        function startConnection() {
+            // Prevent overlapping connection attempts
+            if (isConnecting) {
+                console.log('[Remote] Connection attempt already in progress, skipping');
+                return;
+            }
+            isConnecting = true;
+
+            const attemptId = ++connectionAttemptId;
+            const isStale = () => attemptId !== connectionAttemptId;
+
+            const signalingUrl = window.location.origin;
+            console.log('[Remote] Connecting to:', signalingUrl, '(attempt id:', attemptId, ')');
+
+            state.screen = 'loading';
+            render();
+
+            socket = io(signalingUrl, {
+                reconnection: false,       // we handle reconnection ourselves
+                timeout: 10000,            // connection timeout
+                forceNew: true             // always create a fresh transport
+            });
 
             socket.on('connect', () => {
+                if (isStale()) return;
                 console.log('[Remote] Socket connected');
                 socket.emit('JOIN_ROOM', {
                     roomId: 'default',
@@ -1583,32 +1784,60 @@
             });
 
             socket.on('JOIN_SUCCESS', (data) => {
+                if (isStale()) return;
                 console.log('[Remote] Joined room:', data);
-                initPeer(data.hostPeerId);
+                initPeer(data.hostPeerId, attemptId);
             });
 
             socket.on('JOIN_REJECTED', (data) => {
+                if (isStale()) return;
                 console.error('[Remote] Rejected:', data);
+                isConnecting = false;
                 state.screen = 'disconnected';
+                state.reconnecting = false;
                 render();
+            });
+
+            socket.on('HOST_DISCONNECTED', () => {
+                if (isStale()) return;
+                console.log('[Remote] Host disconnected, will reconnect...');
+                scheduleReconnect();
+            });
+
+            socket.on('disconnect', () => {
+                if (isStale()) return;
+                console.log('[Remote] Socket disconnected');
+                if (state.screen === 'connected') {
+                    scheduleReconnect();
+                }
             });
 
             socket.on('connect_error', (err) => {
-                console.error('[Remote] Socket error:', err);
-                state.screen = 'disconnected';
-                render();
+                if (isStale()) return;
+                console.error('[Remote] Socket error:', err.message || err);
+                scheduleReconnect();
             });
 
-            setTimeout(() => {
-                if (state.screen === 'loading') {
-                    state.screen = 'disconnected';
-                    render();
-                }
-            }, 15000);
+            // First-connect timeout: if we're still stuck in loading after 15 s,
+            // and this is the very first attempt, kick off the reconnect cycle.
+            if (!state.reconnecting) {
+                setTimeout(() => {
+                    if (isStale()) return;
+                    if (state.screen === 'loading' && !state.reconnecting) {
+                        console.log('[Remote] Initial connection timed out');
+                        scheduleReconnect();
+                    }
+                }, 15000);
+            }
         }
 
-        function initPeer(hostPeerId) {
-            console.log('[Remote] Connecting to host:', hostPeerId);
+        // Keep legacy name so the remote-ui HTML onclick="reconnect()" still works
+        var initConnection = startConnection;
+
+        function initPeer(hostPeerId, attemptId) {
+            const isStale = () => attemptId !== connectionAttemptId;
+
+            console.log('[Remote] Connecting to host peer:', hostPeerId);
 
             peer = new Peer({
                 config: {
@@ -1620,17 +1849,24 @@
             });
 
             peer.on('open', (myId) => {
+                if (isStale()) { try { peer.destroy(); } catch(e) {} return; }
                 console.log('[Remote] My peer ID:', myId);
                 dataConn = peer.connect(hostPeerId, { reliable: true });
 
                 dataConn.on('open', () => {
+                    if (isStale()) return;
+                    const wasReconnecting = state.reconnectAttempts > 0;
                     console.log('[Remote] Connected to host!');
                     state.screen = 'connected';
+                    state.reconnectAttempts = 0;
+                    state.reconnecting = false;
+                    isConnecting = false;
                     render();
-                    showToast('Connected!');
+                    showToast(wasReconnecting ? 'Reconnected!' : 'Connected!');
                 });
 
                 dataConn.on('data', (data) => {
+                    if (isStale()) return;
                     console.log('[Remote] Received:', data);
                     if (data.type === 'STATE_UPDATE') {
                         // Check for successful actions by comparing old and new state
@@ -1643,16 +1879,16 @@
                             if (oldState && newState) {
                                 const oldQueueLen = oldState.queue?.length || 0;
                                 const newQueueLen = newState.queue?.length || 0;
-                                const oldPlaylistLen = oldState.playlist?.length || 0;
-                                const newPlaylistLen = newState.playlist?.length || 0;
+                                const oldPlaylistTotal = (oldState.playlists || []).reduce((s, c) => s + (c.songs ? c.songs.length : 0), 0);
+                                const newPlaylistTotal = (newState.playlists || []).reduce((s, c) => s + (c.songs ? c.songs.length : 0), 0);
 
                                 if (newQueueLen > oldQueueLen) {
                                     showToast('Song added to queue');
                                 } else if (newQueueLen < oldQueueLen) {
                                     showToast('Song removed from queue');
-                                } else if (newPlaylistLen > oldPlaylistLen) {
+                                } else if (newPlaylistTotal > oldPlaylistTotal) {
                                     showToast('Song added to playlist');
-                                } else if (newPlaylistLen < oldPlaylistLen) {
+                                } else if (newPlaylistTotal < oldPlaylistTotal) {
                                     showToast('Removed from playlist');
                                 } else if (state.loadingActions.size > 0) {
                                     // Queue reordering or other action
@@ -1687,19 +1923,36 @@
                 });
 
                 dataConn.on('close', () => {
-                    state.screen = 'disconnected';
-                    render();
+                    if (isStale()) return;
+                    console.log('[Remote] Data connection closed');
+                    if (state.screen === 'connected') {
+                        scheduleReconnect();
+                    }
                 });
 
                 dataConn.on('error', (err) => {
-                    console.error('[Remote] Error:', err);
+                    if (isStale()) return;
+                    console.error('[Remote] Data conn error:', err);
                 });
             });
 
+            peer.on('disconnected', () => {
+                if (isStale()) return;
+                console.log('[Remote] Peer disconnected from broker');
+                // Don't try peer.reconnect() — it races with our own logic.
+                // If the data channel is still open the connection is fine;
+                // otherwise scheduleReconnect will fire from the close event.
+                if (state.screen !== 'connected') {
+                    scheduleReconnect();
+                }
+            });
+
             peer.on('error', (err) => {
-                console.error('[Remote] Peer error:', err);
-                state.screen = 'disconnected';
-                render();
+                if (isStale()) return;
+                console.error('[Remote] Peer error:', err.type || err);
+                if (state.screen === 'connected' || state.screen === 'loading') {
+                    scheduleReconnect();
+                }
             });
         }
 

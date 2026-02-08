@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-use socketioxide::{
-    extract::{Data, SocketRef, State},
-    SocketIo,
-};
+use socketioxide::extract::{Data, SocketRef, State};
 use std::sync::Arc;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -23,12 +20,15 @@ pub struct RoomMetadata {
 #[derive(Clone)]
 pub struct RoomManager {
     rooms: Arc<RwLock<HashMap<String, RoomMetadata>>>,
+    /// Map socket IDs to room IDs for client disconnect tracking
+    socket_rooms: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl RoomManager {
     pub fn new() -> Self {
         Self {
             rooms: Arc::new(RwLock::new(HashMap::new())),
+            socket_rooms: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -43,7 +43,9 @@ impl RoomManager {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        rooms.insert(room_id.clone(), RoomMetadata {
+        let rid = room_id.clone();
+        let hsid = host_socket_id.clone();
+        rooms.insert(rid.clone(), RoomMetadata {
             room_id,
             host_socket_id,
             host_peer_id,
@@ -52,7 +54,7 @@ impl RoomManager {
             client_count: 0,
         });
 
-        log::info!("[Signaling] Room created: {} (host_socket: {})", rooms.get(&room_id).unwrap().room_id, host_socket_id);
+        log::info!("[Signaling] Room created: {} (host_socket: {})", rid, hsid);
         Ok(())
     }
 
@@ -105,6 +107,21 @@ impl RoomManager {
         self.rooms.read().values()
             .find(|r| r.client_count < MAX_CLIENTS_PER_ROOM)
             .cloned()
+    }
+
+    /// Track which room a socket belongs to
+    pub fn set_socket_room(&self, socket_id: &str, room_id: &str) {
+        self.socket_rooms.write().insert(socket_id.to_string(), room_id.to_string());
+    }
+
+    /// Get the room a socket belongs to
+    pub fn get_socket_room(&self, socket_id: &str) -> Option<String> {
+        self.socket_rooms.read().get(socket_id).cloned()
+    }
+
+    /// Remove a socket-to-room mapping
+    pub fn remove_socket_room(&self, socket_id: &str) {
+        self.socket_rooms.write().remove(socket_id);
     }
 }
 
@@ -178,12 +195,8 @@ pub struct ClientLeftPayload {
     pub client_id: String,
 }
 
-// Wrapper struct for storing room ID in socket extensions
-#[derive(Clone, Debug)]
-struct ConnectedRoomId(String);
-
 // Socket handler
-pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
+pub async fn on_connect(socket: SocketRef, _state: State<RoomManager>) {
     log::info!("[Signaling] Client connected: {}", socket.id);
 
     // Host creates a room
@@ -231,11 +244,12 @@ pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
                         let _ = socket.join(room_id.clone());
                         state.add_client(&room_id);
 
-                        // Store metadata in socket extensions
-                        socket.extensions.insert(ConnectedRoomId(room_id.clone()));
+                        // Store socket-to-room mapping
+                        state.set_socket_room(&socket.id.to_string(), &room_id);
 
                         // Notify host
-                        let host_socket_id = room.host_socket_id;
+                        let host_socket_id = room.host_socket_id.clone();
+                        let host_peer_id = room.host_peer_id.unwrap_or_else(|| room.host_socket_id.clone());
                         let _ = socket.to(host_socket_id).emit("CLIENT_JOINED", ClientJoinedPayload {
                             client_id: socket.id.to_string(),
                             display_name: data.display_name,
@@ -245,7 +259,7 @@ pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
                         // Confirm to client
                         let _ = socket.emit("JOIN_SUCCESS", JoinSuccessPayload {
                             room_id: room_id.clone(),
-                            host_peer_id: room.host_peer_id.unwrap_or_else(|| room.host_socket_id.clone()),
+                            host_peer_id,
                         });
 
                         log::info!("[Signaling] Client {} joined room {}", socket.id, room_id);
@@ -274,14 +288,15 @@ pub async fn on_connect(socket: SocketRef, state: State<RoomManager>) {
         }
 
         // Check if client
-        if let Some(ConnectedRoomId(room_id)) = socket.extensions.get::<ConnectedRoomId>() {
-             if let Some(room) = state.get_room(room_id) {
+        if let Some(room_id) = state.get_socket_room(&socket.id.to_string()) {
+             if let Some(room) = state.get_room(&room_id) {
                  // Notify host
                  let _ = socket.to(room.host_socket_id).emit("CLIENT_LEFT", ClientLeftPayload {
                      client_id: socket.id.to_string(),
                  });
-                 state.remove_client(room_id);
+                 state.remove_client(&room_id);
              }
+             state.remove_socket_room(&socket.id.to_string());
         }
     });
 }

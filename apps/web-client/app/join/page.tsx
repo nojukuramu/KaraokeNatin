@@ -14,10 +14,12 @@ export default function JoinPage() {
         const params = new URLSearchParams(window.location.search);
         const r = params.get('r');
         const t = params.get('t');
+        const s = params.get('s');
 
         if (r && t) {
-            // Redirect to room page
-            router.push(`/room/${r}?t=${t}`);
+            // Redirect to room page, forwarding signaling URL if present
+            const signalingParam = s ? `&s=${encodeURIComponent(s)}` : '';
+            router.push(`/room/${r}?t=${t}${signalingParam}`);
         }
     }, [router]);
 

@@ -2,7 +2,7 @@
  * P2P WebRTC DataChannel Protocol Definitions
  */
 
-import { RoomState } from './room-state';
+import { RoomState, CollectionVisibility } from './room-state';
 
 /**
  * Commands sent from Client -> Host
@@ -21,10 +21,17 @@ export type ClientCommand =
     | { type: 'MOVE_SONG_DOWN'; songId: string }
     | { type: 'SET_DISPLAY_NAME'; name: string }
     | { type: 'PING' }
-    // Playlist management commands
-    | { type: 'PLAYLIST_ADD'; youtubeUrl: string }
-    | { type: 'PLAYLIST_REMOVE'; songId: string }
-    | { type: 'PLAYLIST_TO_QUEUE'; songId: string };
+    // Collection management commands
+    | { type: 'CREATE_COLLECTION'; name: string; visibility: CollectionVisibility }
+    | { type: 'DELETE_COLLECTION'; collectionId: string }
+    | { type: 'RENAME_COLLECTION'; collectionId: string; name: string }
+    | { type: 'SET_COLLECTION_VISIBILITY'; collectionId: string; visibility: CollectionVisibility }
+    // Playlist commands (now scoped to collection)
+    | { type: 'PLAYLIST_ADD'; youtubeUrl: string; collectionId: string }
+    | { type: 'PLAYLIST_REMOVE'; songId: string; collectionId: string }
+    | { type: 'PLAYLIST_TO_QUEUE'; songId: string; collectionId: string }
+    // Import collection 
+    | { type: 'IMPORT_COLLECTION'; data: string };
 
 /**
  * Broadcasts sent from Host -> Clients
@@ -46,7 +53,9 @@ export function isClientCommand(data: unknown): data is ClientCommand {
         'PLAY', 'PAUSE', 'SKIP', 'SEEK', 'SET_VOLUME', 'TOGGLE_MUTE',
         'ADD_SONG', 'REMOVE_SONG', 'REORDER_QUEUE', 'MOVE_SONG_UP', 'MOVE_SONG_DOWN',
         'SET_DISPLAY_NAME', 'PING',
-        'PLAYLIST_ADD', 'PLAYLIST_REMOVE', 'PLAYLIST_TO_QUEUE'
+        'CREATE_COLLECTION', 'DELETE_COLLECTION', 'RENAME_COLLECTION', 'SET_COLLECTION_VISIBILITY',
+        'PLAYLIST_ADD', 'PLAYLIST_REMOVE', 'PLAYLIST_TO_QUEUE',
+        'IMPORT_COLLECTION'
     ];
     return validTypes.includes((data as any).type);
 }

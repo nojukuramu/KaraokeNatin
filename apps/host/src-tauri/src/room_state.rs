@@ -4,48 +4,101 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::fs;
 
-/// Get the playlist file path
-fn get_playlist_path() -> PathBuf {
-    // Use local app data directory
-    let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+/// Get the data directory for KaraokeNatin
+fn get_data_dir() -> PathBuf {
+    let base = dirs::data_local_dir()
+        .or_else(|| dirs::data_dir())
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+    let mut path = base;
     path.push("KaraokeNatin");
     fs::create_dir_all(&path).ok();
+    path
+}
+
+/// Get the playlists file path
+fn get_playlists_path() -> PathBuf {
+    let mut path = get_data_dir();
+    path.push("playlists.json");
+    path
+}
+
+/// Get the legacy playlist file path (for migration)
+fn get_legacy_playlist_path() -> PathBuf {
+    let mut path = get_data_dir();
     path.push("playlist.json");
     path
 }
 
-/// Load playlist from file
-fn load_playlist_from_file() -> Vec<Song> {
-    let path = get_playlist_path();
+/// Load playlists from file, with migration from legacy format
+fn load_playlists_from_file() -> Vec<PlaylistCollection> {
+    let path = get_playlists_path();
+    
+    // Try loading new format first
     if path.exists() {
         match fs::read_to_string(&path) {
             Ok(content) => {
-                match serde_json::from_str(&content) {
-                    Ok(playlist) => {
-                        log::info!("Loaded {} songs from playlist file", Vec::<Song>::len(&playlist));
-                        return playlist;
+                match serde_json::from_str::<Vec<PlaylistCollection>>(&content) {
+                    Ok(playlists) => {
+                        let total_songs: usize = playlists.iter().map(|c| c.songs.len()).sum();
+                        log::info!("Loaded {} collections ({} total songs) from playlists file", playlists.len(), total_songs);
+                        return playlists;
                     }
-                    Err(e) => log::error!("Failed to parse playlist file: {}", e),
+                    Err(e) => log::error!("Failed to parse playlists file: {}", e),
                 }
             }
-            Err(e) => log::error!("Failed to read playlist file: {}", e),
+            Err(e) => log::error!("Failed to read playlists file: {}", e),
         }
     }
+    
+    // Try migrating from legacy playlist.json
+    let legacy_path = get_legacy_playlist_path();
+    if legacy_path.exists() {
+        log::info!("Found legacy playlist.json, migrating to collections format...");
+        match fs::read_to_string(&legacy_path) {
+            Ok(content) => {
+                match serde_json::from_str::<Vec<Song>>(&content) {
+                    Ok(songs) => {
+                        let now = chrono::Utc::now().timestamp_millis();
+                        let default_collection = PlaylistCollection {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            name: "Default Playlist".to_string(),
+                            visibility: CollectionVisibility::Public,
+                            songs,
+                            created_at: now,
+                            updated_at: now,
+                        };
+                        let playlists = vec![default_collection];
+                        save_playlists_to_file(&playlists);
+                        // Remove legacy file after successful migration
+                        let _ = fs::remove_file(&legacy_path);
+                        log::info!("Migration complete: {} songs moved to 'Default Playlist'", playlists[0].songs.len());
+                        return playlists;
+                    }
+                    Err(e) => log::error!("Failed to parse legacy playlist: {}", e),
+                }
+            }
+            Err(e) => log::error!("Failed to read legacy playlist: {}", e),
+        }
+    }
+    
     Vec::new()
 }
 
-/// Save playlist to file
-fn save_playlist_to_file(playlist: &[Song]) {
-    let path = get_playlist_path();
-    match serde_json::to_string_pretty(playlist) {
+/// Save playlists to file
+fn save_playlists_to_file(playlists: &[PlaylistCollection]) {
+    let path = get_playlists_path();
+    match serde_json::to_string_pretty(playlists) {
         Ok(content) => {
             if let Err(e) = fs::write(&path, content) {
-                log::error!("Failed to write playlist file: {}", e);
+                log::error!("Failed to write playlists file: {}", e);
             } else {
-                log::info!("Saved {} songs to playlist file", playlist.len());
+                let total_songs: usize = playlists.iter().map(|c| c.songs.len()).sum();
+                log::info!("Saved {} collections ({} total songs) to playlists file", playlists.len(), total_songs);
             }
         }
-        Err(e) => log::error!("Failed to serialize playlist: {}", e),
+        Err(e) => log::error!("Failed to serialize playlists: {}", e),
     }
 }
 
@@ -65,6 +118,243 @@ pub struct Song {
     #[serde(rename = "addedAt")]
     pub added_at: i64,
 }
+
+/// Collection visibility
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CollectionVisibility {
+    Public,
+    Personal,
+}
+
+/// A named collection of songs (playlist)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistCollection {
+    pub id: String,
+    pub name: String,
+    pub visibility: CollectionVisibility,
+    pub songs: Vec<Song>,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+}
+
+// ============================================================
+// PlaylistStore — standalone, decoupled from Room lifecycle
+// ============================================================
+
+/// Thread-safe playlist store (always available, both Host and Guest modes)
+pub struct PlaylistStore {
+    playlists: Arc<RwLock<Vec<PlaylistCollection>>>,
+}
+
+impl PlaylistStore {
+    pub fn new() -> Self {
+        Self {
+            playlists: Arc::new(RwLock::new(load_playlists_from_file())),
+        }
+    }
+
+    /// Get a snapshot of all playlists
+    pub fn get_all(&self) -> Vec<PlaylistCollection> {
+        self.playlists.read().clone()
+    }
+
+    /// Get only public playlists (for broadcasting to remotes)
+    pub fn get_public(&self) -> Vec<PlaylistCollection> {
+        self.playlists.read().iter()
+            .filter(|c| c.visibility == CollectionVisibility::Public)
+            .cloned()
+            .collect()
+    }
+
+    /// Create a new playlist collection, returns its ID
+    pub fn create_collection(&self, name: String, visibility: CollectionVisibility) -> String {
+        let now = chrono::Utc::now().timestamp_millis();
+        let id = uuid::Uuid::new_v4().to_string();
+        let mut pl = self.playlists.write();
+        pl.push(PlaylistCollection {
+            id: id.clone(),
+            name,
+            visibility,
+            songs: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        });
+        save_playlists_to_file(&pl);
+        id
+    }
+
+    /// Delete a playlist collection
+    pub fn delete_collection(&self, collection_id: &str) -> bool {
+        let mut pl = self.playlists.write();
+        if let Some(pos) = pl.iter().position(|c| c.id == collection_id) {
+            pl.remove(pos);
+            save_playlists_to_file(&pl);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Rename a playlist collection
+    pub fn rename_collection(&self, collection_id: &str, name: String) -> bool {
+        let mut pl = self.playlists.write();
+        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+            col.name = name;
+            col.updated_at = chrono::Utc::now().timestamp_millis();
+            save_playlists_to_file(&pl);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set visibility of a playlist collection
+    pub fn set_collection_visibility(&self, collection_id: &str, visibility: CollectionVisibility) -> bool {
+        let mut pl = self.playlists.write();
+        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+            col.visibility = visibility;
+            col.updated_at = chrono::Utc::now().timestamp_millis();
+            save_playlists_to_file(&pl);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Add a song to a specific collection
+    pub fn add_to_collection(&self, collection_id: &str, song: Song) -> bool {
+        let mut pl = self.playlists.write();
+        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+            col.songs.push(song);
+            col.updated_at = chrono::Utc::now().timestamp_millis();
+            save_playlists_to_file(&pl);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a song from a specific collection
+    pub fn remove_from_collection(&self, collection_id: &str, song_id: &str) -> bool {
+        let mut pl = self.playlists.write();
+        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+            if let Some(pos) = col.songs.iter().position(|s| s.id == song_id) {
+                col.songs.remove(pos);
+                col.updated_at = chrono::Utc::now().timestamp_millis();
+                save_playlists_to_file(&pl);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Copy a song from a collection, returning a new Song for the queue
+    pub fn clone_song_for_queue(&self, collection_id: &str, song_id: &str) -> Option<Song> {
+        let pl = self.playlists.read();
+        pl.iter()
+            .find(|c| c.id == collection_id)
+            .and_then(|c| c.songs.iter().find(|s| s.id == song_id))
+            .map(|song| Song {
+                id: uuid::Uuid::new_v4().to_string(),
+                youtube_id: song.youtube_id.clone(),
+                title: song.title.clone(),
+                artist: song.artist.clone(),
+                duration: song.duration,
+                thumbnail_url: song.thumbnail_url.clone(),
+                added_by: song.added_by.clone(),
+                added_at: chrono::Utc::now().timestamp_millis(),
+            })
+    }
+
+    /// Get the default collection ID, creating one if none exist
+    pub fn get_or_create_default_collection(&self) -> String {
+        {
+            let pl = self.playlists.read();
+            if let Some(first) = pl.first() {
+                return first.id.clone();
+            }
+        }
+        self.create_collection("Default Playlist".to_string(), CollectionVisibility::Public)
+    }
+
+    /// Import a collection from JSON data
+    pub fn import_collection(&self, data: &str) -> Result<String, String> {
+        #[derive(Deserialize)]
+        struct ExportedCollection {
+            #[allow(dead_code)]
+            karaokenatin: String,
+            collection: ImportedCollectionData,
+        }
+        #[derive(Deserialize)]
+        struct ImportedCollectionData {
+            name: String,
+            visibility: CollectionVisibility,
+            songs: Vec<Song>,
+        }
+
+        let exported: ExportedCollection = serde_json::from_str(data)
+            .map_err(|e| format!("Invalid collection data: {}", e))?;
+        
+        let now = chrono::Utc::now().timestamp_millis();
+        let id = uuid::Uuid::new_v4().to_string();
+        
+        let songs: Vec<Song> = exported.collection.songs.into_iter().map(|mut s| {
+            s.id = uuid::Uuid::new_v4().to_string();
+            s.added_at = now;
+            s
+        }).collect();
+        
+        let mut pl = self.playlists.write();
+        pl.push(PlaylistCollection {
+            id: id.clone(),
+            name: exported.collection.name,
+            visibility: exported.collection.visibility,
+            songs,
+            created_at: now,
+            updated_at: now,
+        });
+        save_playlists_to_file(&pl);
+        Ok(id)
+    }
+
+    /// Export a collection to JSON
+    pub fn export_collection(&self, collection_id: &str) -> Result<String, String> {
+        let pl = self.playlists.read();
+        let col = pl.iter().find(|c| c.id == collection_id)
+            .ok_or_else(|| "Collection not found".to_string())?;
+        
+        #[derive(Serialize)]
+        struct ExportedCollection<'a> {
+            karaokenatin: &'a str,
+            collection: ExportedCollectionData<'a>,
+        }
+        #[derive(Serialize)]
+        struct ExportedCollectionData<'a> {
+            name: &'a str,
+            visibility: &'a CollectionVisibility,
+            songs: &'a [Song],
+        }
+
+        let export = ExportedCollection {
+            karaokenatin: "1.0",
+            collection: ExportedCollectionData {
+                name: &col.name,
+                visibility: &col.visibility,
+                songs: &col.songs,
+            },
+        };
+        
+        serde_json::to_string_pretty(&export)
+            .map_err(|e| format!("Failed to serialize: {}", e))
+    }
+}
+
+// ============================================================
+// RoomState — player + queue state for Host Mode
+// ============================================================
 
 /// Player status
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,7 +391,7 @@ pub struct ConnectedClient {
     pub connected_at: i64,
 }
 
-/// Main room state
+/// Main room state (for Host Mode broadcasting)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomState {
     #[serde(rename = "roomId")]
@@ -112,7 +402,7 @@ pub struct RoomState {
     pub connected_clients: Vec<ConnectedClient>,
     pub player: PlayerState,
     pub queue: Vec<Song>,
-    pub playlist: Vec<Song>,
+    pub playlists: Vec<PlaylistCollection>,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "updatedAt")]
@@ -120,8 +410,8 @@ pub struct RoomState {
 }
 
 impl RoomState {
-    /// Create a new room state
-    pub fn new(room_id: String, host_peer_id: String) -> Self {
+    /// Create a new room state (playlists injected from PlaylistStore)
+    pub fn new(room_id: String, host_peer_id: String, playlists: Vec<PlaylistCollection>) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
             room_id,
@@ -136,22 +426,25 @@ impl RoomState {
                 is_muted: false,
             },
             queue: Vec::new(),
-            playlist: load_playlist_from_file(),
+            playlists,
             created_at: now,
             updated_at: now,
         }
     }
 
+    /// Refresh playlists from PlaylistStore snapshot
+    pub fn sync_playlists(&mut self, playlists: Vec<PlaylistCollection>) {
+        self.playlists = playlists;
+        self.touch();
+    }
 
     /// Add a song to the queue
     pub fn add_song(&mut self, song: Song) {
-        // If nothing is playing, set this song as current_song immediately
         if self.player.current_song.is_none() {
             self.player.current_song = Some(song);
             self.player.status = PlayerStatus::Loading;
             self.player.current_time = 0.0;
         } else {
-            // Otherwise add to the queue
             self.queue.push(song);
         }
         self.touch();
@@ -260,13 +553,11 @@ impl RoomState {
     /// Skip to next song
     pub fn skip_song(&mut self) {
         if !self.queue.is_empty() {
-            // Move the first song from queue to current_song
             let next_song = self.queue.remove(0);
             self.player.current_song = Some(next_song);
             self.player.current_time = 0.0;
             self.player.status = PlayerStatus::Loading;
         } else {
-            // No more songs in queue, clear current song
             self.player.current_song = None;
             self.player.current_time = 0.0;
             self.player.status = PlayerStatus::Idle;
@@ -280,7 +571,6 @@ impl RoomState {
             self.player.status = PlayerStatus::Playing;
             self.touch();
         } else if !self.queue.is_empty() {
-            // Move the first song from queue to current_song
             let next_song = self.queue.remove(0);
             self.player.current_song = Some(next_song);
             self.player.status = PlayerStatus::Loading;
@@ -314,46 +604,11 @@ impl RoomState {
         self.touch();
     }
 
-    // ========== Playlist Management ==========
-
-    /// Add a song to the playlist
-    pub fn add_to_playlist(&mut self, song: Song) {
-        self.playlist.push(song);
-        save_playlist_to_file(&self.playlist);
-        self.touch();
-    }
-
-    /// Remove a song from the playlist by ID
-    pub fn remove_from_playlist(&mut self, song_id: &str) -> bool {
-        if let Some(pos) = self.playlist.iter().position(|s| s.id == song_id) {
-            self.playlist.remove(pos);
-            save_playlist_to_file(&self.playlist);
-            self.touch();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Copy a song from the playlist to the queue (or current_song if nothing is playing)
-    pub fn playlist_to_queue(&mut self, song_id: &str) -> bool {
-        if let Some(song) = self.playlist.iter().find(|s| s.id == song_id).cloned() {
-            // Create a new song instance with a new ID and timestamp
-            let new_song = Song {
-                id: uuid::Uuid::new_v4().to_string(),
-                youtube_id: song.youtube_id,
-                title: song.title,
-                artist: song.artist,
-                duration: song.duration,
-                thumbnail_url: song.thumbnail_url,
-                added_by: song.added_by,
-                added_at: chrono::Utc::now().timestamp_millis(),
-            };
-            self.add_song(new_song);
-            true
-        } else {
-            false
-        }
+    /// Get a copy of the state with only public playlists (for broadcasting to remote clients)
+    pub fn public_state(&self) -> RoomState {
+        let mut state = self.clone();
+        state.playlists.retain(|c| c.visibility == CollectionVisibility::Public);
+        state
     }
 
     /// Update the timestamp
@@ -369,20 +624,24 @@ pub struct RoomStateManager {
 
 impl RoomStateManager {
     /// Create a new room state manager
-    pub fn new(room_id: String, host_peer_id: String) -> Self {
+    pub fn new(room_id: String, host_peer_id: String, playlists: Vec<PlaylistCollection>) -> Self {
         Self {
-            state: Arc::new(RwLock::new(RoomState::new(room_id, host_peer_id))),
+            state: Arc::new(RwLock::new(RoomState::new(room_id, host_peer_id, playlists))),
         }
     }
 
-    /// Get a read lock on the state
     /// Get a write lock on the state
     pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, RoomState> {
         self.state.write()
     }
 
-    /// Clone the current state
+    /// Clone the current state (full, including personal collections — for host UI)
     pub fn clone_state(&self) -> RoomState {
         self.state.read().clone()
+    }
+
+    /// Clone a filtered state (public only — for broadcast to remote clients)
+    pub fn clone_public_state(&self) -> RoomState {
+        self.state.read().public_state()
     }
 }

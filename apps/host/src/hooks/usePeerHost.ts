@@ -24,9 +24,16 @@ export function usePeerHost() {
     // Subscribe to room state updates and broadcast to all connected peers
     useEffect(() => {
         const unlisten = listen<RoomState>('room_state_updated', (event) => {
+            // Filter out personal playlists before broadcasting to remote clients
+            const publicState = {
+                ...event.payload,
+                playlists: (event.payload.playlists || []).filter(
+                    (c: { visibility: string }) => c.visibility === 'public'
+                ),
+            };
             const broadcast: HostBroadcast = {
                 type: 'STATE_UPDATE',
-                state: event.payload,
+                state: publicState,
             };
             connectionsRef.current.forEach((conn) => {
                 if (conn.open) {
@@ -74,6 +81,10 @@ export function usePeerHost() {
                     const baseUrl = await invoke<string>('get_qr_url');
                     // For remote-ui, we just point to the root. It auto-discovers the room.
                     setConnectionUrl(baseUrl);
+
+                    // Log a URL for the Next.js web client (dev use)
+                    const webClientUrl = `http://localhost:3000/room/${roomId}?t=${joinToken}&s=${encodeURIComponent(`http://localhost:${port}`)}`;
+                    console.log('[PeerHost] Web client URL (dev):', webClientUrl);
                 } catch (e) {
                     console.error('Failed to get QR URL:', e);
                     setConnectionUrl(`${window.location.origin}/join?r=${roomId}&t=${joinToken}`);
@@ -162,9 +173,15 @@ export function usePeerHost() {
     const sendStateUpdate = async (conn: DataConnection) => {
         try {
             const state = await getRoomState();
+            const publicState = {
+                ...state,
+                playlists: (state.playlists || []).filter(
+                    (c: { visibility: string }) => c.visibility === 'public'
+                ),
+            };
             const broadcast: HostBroadcast = {
                 type: 'STATE_UPDATE',
-                state,
+                state: publicState,
             };
             conn.send(broadcast);
         } catch (error) {

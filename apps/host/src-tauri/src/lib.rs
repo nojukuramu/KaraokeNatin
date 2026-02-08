@@ -2,24 +2,39 @@
 
 mod room_state;
 mod commands;
-mod sidecar;
+mod metadata;
 mod network;
 mod web_server;
 mod youtube;
 mod signaling;
 
-use room_state::RoomStateManager;
+use room_state::{RoomStateManager, PlaylistStore};
 use uuid::Uuid;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize room state manager with placeholder values
-    // These will be replaced when create_room is called
+    // PlaylistStore is always available (both Host & Guest modes)
+    let playlist_store = PlaylistStore::new();
+
+    // Room state manager — playlists injected from store
     let initial_room_id = "pending".to_string();
     let initial_peer_id = Uuid::new_v4().to_string();
-    let room_manager = RoomStateManager::new(initial_room_id, initial_peer_id);
+    let room_manager = RoomStateManager::new(
+        initial_room_id,
+        initial_peer_id,
+        playlist_store.get_all(),
+    );
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .manage(playlist_store)
         .manage(room_manager)
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -30,37 +45,13 @@ pub fn run() {
                 )?;
             }
 
-            // Start embedded web server in background (with its own Tokio runtime)
-            std::thread::spawn(|| {
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-                rt.block_on(async {
-                    log::info!("[Tauri] Starting embedded web server...");
-                    if let Err(e) = web_server::start_web_server().await {
-                        log::error!("[Tauri] Web server error: {}", e);
-                    }
-                });
-            });
-
-            // Wait a moment for web server to bind its port
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            
-            let web_port = web_server::get_server_port();
-            log::info!("[Tauri] Web server (and signaling) on port {}", web_port);
-
-            // Log local IP for QR code generation
-            match network::generate_qr_url() {
-                Ok(url) => {
-                    log::info!("[Tauri] Remote control URL: {}", url);
-                    log::info!("[Tauri] Scan QR code to connect from your phone");
-                }
-                Err(e) => {
-                    log::error!("[Tauri] Failed to generate QR URL: {}", e);
-                }
-            }
+            // NOTE: Web server is now started lazily via start_host_server command
+            // when the user picks Host Mode from the landing screen.
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Host-mode room commands
             commands::create_room,
             commands::get_qr_url,
             commands::get_server_port,
@@ -68,6 +59,19 @@ pub fn run() {
             commands::search_youtube,
             commands::process_command,
             commands::update_player_state,
+            commands::export_collection,
+            commands::start_host_server,
+            // Standalone playlist commands (available in all modes)
+            commands::get_playlists,
+            commands::playlist_create_collection,
+            commands::playlist_delete_collection,
+            commands::playlist_rename_collection,
+            commands::playlist_set_visibility,
+            commands::playlist_add_song,
+            commands::playlist_remove_song,
+            commands::playlist_import_collection,
+            commands::save_collection_to_file,
+            commands::load_collection_from_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

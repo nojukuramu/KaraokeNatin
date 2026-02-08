@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { RoomState, PlayerState, Song, ClientCommand } from '@karaokenatin/shared';
+import { RoomState, PlayerState, Song, PlaylistCollection, ClientCommand } from '@karaokenatin/shared';
 import { shallow } from 'zustand/shallow';
 
 interface RoomStore {
@@ -65,9 +65,9 @@ export function useQueue(): Song[] {
     );
 }
 
-export function usePlaylist(): Song[] {
+export function usePlaylists(): PlaylistCollection[] {
     return useRoomStore(
-        (state) => state.roomState?.playlist || [],
+        (state) => state.roomState?.playlists || [],
         shallow
     );
 }
