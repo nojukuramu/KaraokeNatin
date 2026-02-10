@@ -17,14 +17,35 @@ set HOST_DIR=%PROJECT_ROOT%apps\host
 set TAURI_DIR=%HOST_DIR%\src-tauri
 set ANDROID_GEN=%TAURI_DIR%\gen\android
 
+REM --- Configuration Loading ---
+if exist "%PROJECT_ROOT%.env" (
+    echo Loading configuration from .env file...
+    for /f "usebackq tokens=1* delims==" %%A in ("%PROJECT_ROOT%.env") do (
+        set "%%A=%%B"
+    )
+)
+
 REM --- Android SDK / NDK paths ---
-if "%ANDROID_HOME%"=="" set ANDROID_HOME=D:\Program Files\android_sdk
-if "%NDK_HOME%"=="" set NDK_HOME=%ANDROID_HOME%\ndk\27.0.12077973
-if "%JAVA_HOME%"=="" set JAVA_HOME=D:\jdk-21
+if "%ANDROID_HOME%"=="" (
+    echo ERROR: ANDROID_HOME is not set. Please set it in .env or environment variables.
+    exit /b 1
+)
+if "%NDK_HOME%"=="" (
+    echo ERROR: NDK_HOME is not set. Please set it in .env or environment variables.
+    exit /b 1
+)
+if "%JAVA_HOME%"=="" (
+    echo ERROR: JAVA_HOME is not set. Please set it in .env or environment variables.
+    exit /b 1
+)
 
 set BUILD_TOOLS=%ANDROID_HOME%\build-tools\36.0.0
-set KEYSTORE=%PROJECT_ROOT%karaokenatin.keystore
-set KEYSTORE_ALIAS=karaokenatin
+
+REM --- Keystore Configuration ---
+if "%KEYSTORE_PATH%"=="" set KEYSTORE_PATH=karaokenatin.keystore
+set KEYSTORE=%PROJECT_ROOT%%KEYSTORE_PATH%
+
+if "%KEYSTORE_ALIAS%"=="" set KEYSTORE_ALIAS=karaokenatin
 
 REM --- Parse argument ---
 set TARGET=%1

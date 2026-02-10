@@ -39,3 +39,4 @@ out/
 *.keystore
 *.jks
 KaraokeNatin-*.apk
+KaraokeNatin-*.idsig
