@@ -12,7 +12,8 @@ import {
     playlistRemoveSong,
     exportCollection,
     saveCollectionToFile,
-    loadCollectionFromFile
+    loadCollectionFromFile,
+    playlistImportCollection
 } from '../lib/commands';
 import { setHostInputFocused } from '../hooks/useRoomState';
 
@@ -213,9 +214,7 @@ export default function Library({ onBack }: LibraryProps) {
     const handleLoadFromFile = async () => {
         try {
             const json = await loadCollectionFromFile();
-            await invoke('process_command', {
-                command: { type: 'IMPORT_COLLECTION', data: json },
-            });
+            await playlistImportCollection(json);
             await loadCollections();
         } catch (error) {
             console.error('[Library] Load from file failed:', error);
