@@ -104,10 +104,18 @@ fn default_public_visibility() -> CollectionVisibility {
 
 /// Create a new room
 #[tauri::command]
-pub fn create_room(_state: tauri::State<RoomStateManager>) -> Result<CreateRoomResponse, String> {
+pub fn create_room(
+    state: tauri::State<RoomStateManager>,
+    playlists: tauri::State<PlaylistStore>,
+) -> Result<CreateRoomResponse, String> {
     // Generate unique room ID and join token
     let room_id = generate_room_id();
     let join_token = generate_join_token();
+    
+    // Sync latest playlists from store into the new room state
+    // This ensures that if the user created playlists in Guest mode (via bridge),
+    // they are immediately available in the new Host session.
+    state.write().sync_playlists(playlists.get_all());
     
     log::info!("Created room: {} with token", room_id);
     

@@ -14,12 +14,31 @@
             box-sizing: border-box;
             scrollbar-width: thin;
             scrollbar-color: var(--bg-hover) transparent;
+            /* Safe area for mobile devices */
+            padding-top: env(safe-area-inset-top);
         }
-        *::-webkit-scrollbar { width: 5px; height: 5px; }
-        *::-webkit-scrollbar-track { background: transparent; }
-        *::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 3px; }
-        *::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-        *::-webkit-scrollbar-corner { background: transparent; }
+
+        *::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background: var(--bg-hover);
+            border-radius: 3px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        *::-webkit-scrollbar-corner {
+            background: transparent;
+        }
 
         :root {
             /* Dark Mode (Default) */
@@ -952,6 +971,7 @@
         .retry-btn:hover {
             background: var(--bg-secondary);
         }
+
         /* Playlist Web Remote Note */
         .playlist-web-note {
             display: flex;
@@ -1040,8 +1060,15 @@
             reconnectAttempts: 0,
             maxReconnectAttempts: 5,
             reconnecting: false,
+            reconnecting: false,
             // InApp Remote mode (embedded in Tauri host app)
-            isInAppRemote: new URLSearchParams(window.location.search).get('mode') === 'inapp'
+            isInAppRemote: new URLSearchParams(window.location.search).get('mode') === 'inapp',
+            // Local Library (from Native App)
+            localPlaylists: [],
+            activeLocalCollectionIdx: 0,
+            pickerOpenFor: null,
+            libraryPickerOpenFor: null,
+            librarySearchQuery: ''
         };
 
         let socket = null;
@@ -1190,17 +1217,15 @@
                         </div>
                     </div>
                     <div class="header-actions">
-                        ${!state.isInAppRemote ? `
                         <button class="icon-btn" onclick="showInviteQR()" title="Invite friends">
                             ${icons.userPlus}
-                        </button>` : ''}
+                        </button>
                         <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
                             ${state.theme === 'dark' ? icons.sun : icons.moon}
                         </button>
                     </div>
                 </header>
 
-                ${state.isInAppRemote ? '' : `
                 <nav class="nav-tabs">
                     <button class="nav-tab ${state.activeTab === 'playing' ? 'active' : ''}" onclick="setTab('playing')">
                         Playing${queue.length > 0 ? ` (${queue.length})` : ''}
@@ -1209,33 +1234,33 @@
                         Search
                     </button>
                     <button class="nav-tab ${state.activeTab === 'playlist' ? 'active' : ''}" onclick="setTab('playlist')">
-                        Playlist (${totalPlaylistSongs})
+                        Host Playlists
                     </button>
+                    ${state.isInAppRemote ? `
+                    <button class="nav-tab ${state.activeTab === 'library' ? 'active' : ''}" onclick="setTab('library')">
+                        My Library
+                    </button>
+                    ` : ''}
                 </nav>
-                `}
 
                 <main class="main">
-                    ${state.isInAppRemote
-                        ? renderPlayingTab(currentSong, player, isPlaying)
-                        : `
                             ${state.activeTab === 'playing' ? renderPlayingTab(currentSong, player, isPlaying) : ''}
                             ${state.activeTab === 'search' ? renderSearchTab() : ''}
                             ${state.activeTab === 'playlist' ? renderPlaylistTab(playlists) : ''}
-                        `
-                    }
+                            ${state.activeTab === 'library' ? renderLibraryTab() : ''}
                 </main>
 
-                <footer class="yt-footer">
-                    Videos are played via YouTube embedding. All videos are subject to YouTube's <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">Terms of Service</a>.
-                </footer>
-            `;
+            <footer class="yt-footer">
+                Videos are played via YouTube embedding. All videos are subject to YouTube's <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">Terms of Service</a>.
+            </footer>
+        `;
         }
 
         function renderPlayingTab(currentSong, player, isPlaying) {
             const queue = state.roomState?.queue || [];
             return `
-                <section class="now-playing">
-                    ${currentSong ? `
+            <section class="now-playing">
+                ${currentSong ? `
                         <div class="now-playing-content">
                             <img class="now-playing-thumb" src="${currentSong.thumbnailUrl || `https://i.ytimg.com/vi/${currentSong.youtubeId}/hqdefault.jpg`}" alt="">
                             <div class="now-playing-info">
@@ -1252,14 +1277,14 @@
                     `}
                 </section>
 
-                <section class="controls">
-                    <button class="control-btn primary" onclick="togglePlayPause()" title="${isPlaying ? 'Pause' : 'Play'}" id="play-pause-btn">
-                        ${isPlaying ? icons.pause : icons.play}
-                    </button>
-                    <button class="control-btn" onclick="skipSong()" title="Skip">
-                        ${icons.skipForward}
-                    </button>
-                </section>
+            <section class="controls">
+                <button class="control-btn primary" onclick="togglePlayPause()" title="${isPlaying ? 'Pause' : 'Play'}" id="play-pause-btn">
+                    ${isPlaying ? icons.pause : icons.play}
+                </button>
+                <button class="control-btn" onclick="skipSong()" title="Skip">
+                    ${icons.skipForward}
+                </button>
+            </section>
 
                 ${queue.length > 0 ? `
                     <section class="playing-queue">
@@ -1293,44 +1318,46 @@
                             `}).join('')}
                         </div>
                     </section>
-                ` : ''}
-            `;
+                ` : ''
+                }
+        `;
         }
 
         function renderSearchTab() {
             return `
-                <section class="search-container">
-                    <form class="search-input-wrapper" onsubmit="handleSearch(event)">
-                        <input 
-                            type="text" 
-                            class="search-input" 
-                            id="search-input"
-                            placeholder="Search for songs..." 
-                            value="${escapeHtml(state.searchQuery)}"
-                            onfocus="state.isInputFocused = true"
-                            onblur="state.isInputFocused = false"
-                            oninput="state.searchQuery = this.value"
-                        >
+            <section class="search-container">
+                <form class="search-input-wrapper" onsubmit="handleSearch(event)">
+                    <input
+                        type="text"
+                        class="search-input"
+                        id="search-input"
+                        placeholder="Search for songs..."
+                        value="${escapeHtml(state.searchQuery)}"
+                        onfocus="state.isInputFocused = true"
+                        onblur="state.isInputFocused = false"
+                        oninput="state.searchQuery = this.value"
+                    >
                         <button type="submit" class="search-btn">
                             Search
                         </button>
-                    </form>
+                </form>
                 </section>
 
-                ${state.searching ? `
+            ${state.searching ? `
                     <div class="loading" style="min-height: 200px;">
                         <div class="spinner"></div>
                         <p>Searching...</p>
                     </div>
-                ` : ''}
+                ` : ''
+                }
 
                 ${!state.searching && state.searchResults.length > 0 ? `
                     <section class="search-results">
                         ${state.searchResults.map(result => {
-                const isAdded = state.addedSongs.has(result.url);
-                const isQueueLoading = state.loadingActions.has('queue_' + result.url);
-                const isPlaylistLoading = state.loadingActions.has('playlist_' + result.url);
-                return `
+                    const isAdded = state.addedSongs.has(result.url);
+                    const isQueueLoading = state.loadingActions.has('queue_' + result.url);
+                    const isPlaylistLoading = state.loadingActions.has('playlist_' + result.url);
+                    return `
                             <div class="search-result">
                                 <img class="search-result-thumb" src="${result.thumbnail}" alt="">
                                 <div class="search-result-info">
@@ -1352,6 +1379,27 @@
                                             <button class="btn-sm btn-secondary${isPlaylistLoading ? ' loading' : ''}" onclick="addToPlaylist('${escapeHtml(result.url)}')" ${isPlaylistLoading ? 'disabled' : ''}>
                                                 ${isPlaylistLoading ? icons.spinnerSmall : icons.plus} Playlist
                                             </button>
+                                            ${state.isInAppRemote ? `
+                                            <div style="position: relative;">
+                                                <button class="btn-sm btn-secondary" onclick="toggleLibraryPicker('${escapeHtml(result.url)}')" title="Save to My Library">
+                                                    ★ Save
+                                                </button>
+                                                ${state.libraryPickerOpenFor === result.url ? `
+                                                <div class="dropdown-menu">
+                                                    <div class="dropdown-header">Save to Collection</div>
+                                                    ${state.localPlaylists.map(pl => `
+                                                        <button class="dropdown-item" onclick="commitSaveToLibrary('${escapeHtml(result.url)}', '${pl.id}')">
+                                                            ${escapeHtml(pl.name)}
+                                                        </button>
+                                                    `).join('')}
+                                                    <div class="dropdown-divider"></div>
+                                                    <button class="dropdown-item create-new" onclick="createLocalCollection('${escapeHtml(result.url)}')">
+                                                        ${icons.plus} New Collection
+                                                    </button>
+                                                </div>
+                                                ` : ''}
+                                            </div>
+                                            ` : ''}
                                         `}
                                         <button class="btn-sm btn-secondary" onclick="openInYouTube('${escapeHtml(result.url)}')">
                                             ${icons.externalLink}
@@ -1359,32 +1407,34 @@
                                     </div>
                                 </div>
                             </div>`
-            }).join('')}
+                }).join('')}
                     </section>
-                ` : ''}
+                ` : ''
+                }
 
                 ${!state.searching && state.searchResults.length === 0 && state.searchQuery ? `
                     <div class="empty-state">
                         <p>No results found</p>
                     </div>
-                ` : ''}
-            `;
+                ` : ''
+                }
+        `;
         }
 
         function renderQueueTab(queue) {
             if (queue.length === 0) {
                 return `
-                    <div class="empty-state">
+            <div class="empty-state">
                         <div class="empty-state-icon">${icons.list}</div>
                         <p>Queue is empty</p>
                         <p style="font-size: 13px; margin-top: 8px;">Search for songs to add them</p>
                     </div>
-                `;
+            `;
             }
 
             return `
-                <section class="queue-list">
-                    ${queue.map((song, i) => {
+            <section class="queue-list">
+                ${queue.map((song, i) => {
                 const isAnyMoveLoading = ['up', 'down'].some(d => state.loadingActions.has('move_' + song.id + '_' + d));
                 const isRemoveLoading = state.loadingActions.has('rmq_' + song.id);
                 return `
@@ -1407,14 +1457,15 @@
                                 </button>
                             </div>
                         </div>
-                    `}).join('')}
+                    `}).join('')
+                }
                 </section>
             `;
         }
 
         function renderPlaylistTab(playlists) {
             const downloadNote = !state.isInAppRemote ? `
-                <div class="playlist-web-note">
+            <div class="playlist-web-note">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                     <span>Personal Playlists are not available in Web Remote. Download the app <a href="https://noju.pythonanywhere.com/karaokenatin/" target="_blank" rel="noopener">here</a>.</span>
                 </div>
@@ -1423,12 +1474,12 @@
             if (playlists.length === 0) {
                 return `
                     ${downloadNote}
-                    <div class="empty-state">
-                        <div class="empty-state-icon">${icons.music}</div>
-                        <p>No playlists available</p>
-                        <p style="font-size: 13px; margin-top: 8px;">Add songs to playlists from search results</p>
-                    </div>
-                `;
+        <div class="empty-state">
+            <div class="empty-state-icon">${icons.music}</div>
+            <p>No playlists available</p>
+            <p style="font-size: 13px; margin-top: 8px;">Add songs to playlists from search results</p>
+        </div>
+        `;
             }
 
             // Clamp active index
@@ -1438,13 +1489,13 @@
 
             return `
                 ${downloadNote}
-                <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;">
-                    ${playlists.map((col, idx) => `
+        <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;">
+            ${playlists.map((col, idx) => `
                         <button class="btn-sm ${idx === state.activeCollectionIdx ? 'btn-primary' : 'btn-secondary'}" onclick="state.activeCollectionIdx=${idx};render();" style="white-space:nowrap;">
-                            ${col.visibility === 'public' ? '🌐' : '🔒'} ${escapeHtml(col.name)} (${(col.songs||[]).length})
+                            ${col.visibility === 'public' ? '🌐' : '🔒'} ${escapeHtml(col.name)} (${(col.songs || []).length})
                         </button>
                     `).join('')}
-                </div>
+        </div>
                 ${songs.length === 0 ? `
                     <div class="empty-state">
                         <p>No songs in "${escapeHtml(active.name)}"</p>
@@ -1466,6 +1517,27 @@
                                 <button class="btn-sm btn-primary${isP2QLoading ? ' loading' : ''}" onclick="playlistToQueue('${active.id}','${song.id}')" title="Add to queue" ${isP2QLoading ? 'disabled' : ''}>
                                     ${isP2QLoading ? icons.spinnerSmall : icons.plus} Queue
                                 </button>
+                                ${state.isInAppRemote ? `
+                                <div style="position: relative;">
+                                    <button class="btn-sm btn-secondary" onclick="toggleLibraryPicker('pl_${song.id}')" title="Save to My Library">
+                                        ★ Save
+                                    </button>
+                                    ${state.libraryPickerOpenFor === 'pl_' + song.id ? `
+                                    <div class="dropdown-menu">
+                                        <div class="dropdown-header">Save to Collection</div>
+                                        ${state.localPlaylists.map(pl => `
+                                            <button class="dropdown-item" onclick="commitSaveToLibrary('https://www.youtube.com/watch?v=${song.youtubeId}', '${pl.id}')">
+                                                ${escapeHtml(pl.name)}
+                                            </button>
+                                        `).join('')}
+                                        <div class="dropdown-divider"></div>
+                                        <button class="dropdown-item create-new" onclick="createLocalCollection('https://www.youtube.com/watch?v=${song.youtubeId}')">
+                                            ${icons.plus} New Collection
+                                        </button>
+                                    </div>
+                                    ` : ''}
+                                </div>
+                                ` : ''}
                                 <button class="queue-action-btn delete${isRemoveLoading ? ' loading' : ''}" onclick="removeFromPlaylist('${active.id}','${song.id}')" title="Remove from playlist" ${isRemoveLoading ? 'disabled' : ''}>
                                     ${isRemoveLoading ? icons.spinnerSmall : icons.trash}
                                 </button>
@@ -1474,6 +1546,99 @@
                     `}).join('')}
                 </section>
                 `}
+        `;
+        }
+
+        function renderLibraryTab() {
+            if (state.localPlaylists.length === 0) {
+                return `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">${icons.music}</div>
+                        <p>Your library is empty</p>
+                        <button class="retry-btn" onclick="createLocalCollection()" style="margin-top: 16px;">
+                            ${icons.plus} New Collection
+                        </button>
+                    </div>
+                `;
+            }
+
+            const activeCollection = state.localPlaylists[state.activeLocalCollectionIdx || 0];
+            let songs = activeCollection.songs || [];
+
+            // Filter songs if query exists
+            if (state.librarySearchQuery) {
+                const q = state.librarySearchQuery.toLowerCase();
+                songs = songs.filter(s =>
+                    s.title.toLowerCase().includes(q) ||
+                    (s.artist && s.artist.toLowerCase().includes(q))
+                );
+            }
+
+            return `
+                <section class="playlist-header">
+                    <div class="playlist-info">
+                        <h2>My Library</h2>
+                        <div class="playlist-meta">
+                            ${state.localPlaylists.length} Collections • ${activeCollection.songs.length} Songs Total
+                        </div>
+                    </div>
+                    <button class="icon-btn" onclick="createLocalCollection()" title="New Collection">
+                        ${icons.plus}
+                    </button>
+                </section>
+                
+                <div class="search-bar" style="margin: 0 16px 16px; position: sticky; top: 0; background: var(--bg-primary); z-index: 10; padding: 8px 0;">
+                    <div class="search-input-wrapper" style="background: var(--bg-secondary); border-radius: 99px; padding: 8px 16px; display: flex; align-items: center; gap: 8px;">
+                        <span style="color: var(--text-tertiary);">${icons.search}</span>
+                        <input type="text" 
+                               placeholder="Filter ${escapeHtml(activeCollection.name)}..." 
+                               value="${escapeHtml(state.librarySearchQuery || '')}"
+                               oninput="state.librarySearchQuery = this.value; render();"
+                               style="background: transparent; border: none; color: var(--text-primary); flex: 1; outline: none; font-size: 16px;">
+                        ${state.librarySearchQuery ? `
+                            <button onclick="state.librarySearchQuery = ''; render();" style="border: none; background: transparent; color: var(--text-tertiary); padding: 4px;">
+                                ${icons.x}
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+
+                ${state.localPlaylists.length > 1 ? `
+                <section class="collection-tabs" style="padding: 0 16px 16px; overflow-x: auto; white-space: nowrap; display: flex; gap: 8px;">
+                    ${state.localPlaylists.map((pl, idx) => `
+                        <button class="chip ${idx === (state.activeLocalCollectionIdx || 0) ? 'active' : ''}" 
+                                onclick="state.activeLocalCollectionIdx = ${idx}; state.librarySearchQuery = ''; render();">
+                            ${escapeHtml(pl.name)}
+                        </button>
+                    `).join('')}
+                </section>
+                ` : ''}
+
+                <section class="queue-list">
+                    ${songs.length === 0 ? `
+                        <div class="empty-state" style="padding: 32px 0;">
+                            <p style="font-size: 14px;">${state.librarySearchQuery ? 'No matches found' : 'No songs in this collection'}</p>
+                        </div>
+                    ` : songs.map((song) => {
+                const isLib2QueueLoading = state.loadingActions.has('lib2q_' + song.id + ' ');
+                return `
+                        <div class="queue-item">
+                            <img class="queue-thumb" src="${song.thumbnailUrl || `https://i.ytimg.com/vi/${song.youtubeId}/hqdefault.jpg`}" alt="">
+                            <div class="queue-info">
+                                <div class="queue-title">${escapeHtml(song.title)}</div>
+                                <div class="queue-artist">${escapeHtml(song.artist || 'Unknown Artist')}</div>
+                            </div>
+                            <div class="queue-actions">
+                                <button class="queue-action-btn" onclick="libraryToQueue('${song.id}', '${song.youtubeId}')" title="Add to Queue" ${isLib2QueueLoading ? 'disabled' : ''}>
+                                    ${isLib2QueueLoading ? icons.spinnerSmall : icons.plus}
+                                </button>
+                                <button class="queue-action-btn delete" onclick="removeFromLibrary('${activeCollection.id}', '${song.id}')" title="Remove">
+                                    ${icons.trash}
+                                </button>
+                            </div>
+                        </div>
+                    `}).join('')}
+                </section>
             `;
         }
 
@@ -1511,7 +1676,7 @@
         }
 
         function addFromSearch(url) {
-            const actionKey = `queue_${url}`;
+            const actionKey = `queue_${url} `;
             if (state.loadingActions.has(actionKey)) return; // Prevent double-click
             state.loadingActions.add(actionKey);
             render();
@@ -1525,7 +1690,7 @@
             const playlists = rs.playlists || [];
             const collectionId = playlists.length > 0 ? playlists[state.activeCollectionIdx || 0].id : null;
             if (!collectionId) { showToast('No playlist available', 'error'); return; }
-            const actionKey = `playlist_${url}`;
+            const actionKey = `playlist_${url} `;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
@@ -1533,7 +1698,7 @@
         }
 
         function playlistToQueue(collectionId, songId) {
-            const actionKey = `p2q_${songId}`;
+            const actionKey = `p2q_${songId} `;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
@@ -1541,11 +1706,74 @@
         }
 
         function removeFromPlaylist(collectionId, songId) {
-            const actionKey = `rmpl_${songId}`;
+            const actionKey = `rmpl_${songId} `;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
             sendCommand({ type: 'PLAYLIST_REMOVE', songId: songId, collectionId: collectionId });
+        }
+
+
+
+        // --- Library Logic ---
+
+        function createLocalCollection() {
+            const name = prompt("Enter collection name:");
+            if (name && name.trim()) {
+                window.parent.postMessage({
+                    type: 'CREATE_LOCAL_COLLECTION',
+                    payload: { name: name.trim() }
+                }, '*');
+            }
+        }
+
+        function toggleLibraryPicker(key) {
+            if (state.libraryPickerOpenFor === key) {
+                state.libraryPickerOpenFor = null;
+            } else {
+                state.libraryPickerOpenFor = key;
+            }
+            render();
+        }
+
+        function commitSaveToLibrary(url, collectionId) {
+            state.libraryPickerOpenFor = null;
+            showToast('Saving to library...');
+            window.parent.postMessage({
+                type: 'ADD_TO_LOCAL_PLAYLIST',
+                payload: { youtubeUrl: url, collectionId }
+            }, '*');
+            render();
+        }
+
+        function createLocalCollection(thenAddUrl) {
+            const name = prompt('Enter collection name:');
+            if (!name) return;
+
+            window.parent.postMessage({
+                type: 'CREATE_LOCAL_COLLECTION',
+                payload: { name: name }
+            }, '*');
+
+            state.libraryPickerOpenFor = null;
+            render();
+        }
+
+        function libraryToQueue(songId, youtubeUrl) {
+            const actionKey = `lib2q_${songId} `;
+            if (state.loadingActions.has(actionKey)) return;
+            state.loadingActions.add(actionKey);
+            render();
+            // Send standard queue command to Host
+            sendCommand({ type: 'ADD_SONG', youtubeUrl: youtubeUrl, addedBy: state.username });
+        }
+
+        function removeFromLibrary(collectionId, songId) {
+            if (!confirm('Remove from library?')) return;
+            window.parent.postMessage({
+                type: 'REMOVE_FROM_LOCAL_PLAYLIST',
+                payload: { collectionId, songId }
+            }, '*');
         }
 
         function openInYouTube(url) {
@@ -1555,7 +1783,7 @@
         }
 
         function moveQueueItem(songId, direction) {
-            const actionKey = `move_${songId}_${direction}`;
+            const actionKey = `move_${songId}_${direction} `;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
@@ -1567,7 +1795,7 @@
         }
 
         function removeFromQueue(songId) {
-            const actionKey = `rmq_${songId}`;
+            const actionKey = `rmq_${songId} `;
             if (state.loadingActions.has(actionKey)) return;
             state.loadingActions.add(actionKey);
             render();
@@ -1591,7 +1819,7 @@
             // Get the current URL (the remote UI URL) which others can use to join
             const inviteUrl = window.location.href;
             showModal('Invite Friends', `
-                <div style="text-align: center;">
+            <div style="text-align: center;">
                     <p style="margin-bottom: 16px; color: var(--text-secondary);">Share this link or scan the QR code:</p>
                     <div id="invite-qr" style="background: white; padding: 16px; border-radius: 12px; display: inline-block; margin-bottom: 16px;"></div>
                     <div style="background: var(--bg-tertiary); padding: 12px; border-radius: 8px; word-break: break-all; font-size: 12px; color: var(--text-primary);">
@@ -1686,15 +1914,15 @@
             if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
             // Detach event handlers first to prevent stale events during teardown
             if (dataConn) {
-                try { dataConn.removeAllListeners(); dataConn.close(); } catch(e) {}
+                try { dataConn.removeAllListeners(); dataConn.close(); } catch (e) { }
                 dataConn = null;
             }
             if (peer) {
-                try { peer.removeAllListeners(); peer.destroy(); } catch(e) {}
+                try { peer.removeAllListeners(); peer.destroy(); } catch (e) { }
                 peer = null;
             }
             if (socket) {
-                try { socket.removeAllListeners(); socket.disconnect(); } catch(e) {}
+                try { socket.removeAllListeners(); socket.disconnect(); } catch (e) { }
                 socket = null;
             }
             isConnecting = false;
@@ -1818,21 +2046,40 @@
                 scheduleReconnect();
             });
 
-            // First-connect timeout: if we're still stuck in loading after 15 s,
-            // and this is the very first attempt, kick off the reconnect cycle.
-            if (!state.reconnecting) {
-                setTimeout(() => {
-                    if (isStale()) return;
-                    if (state.screen === 'loading' && !state.reconnecting) {
-                        console.log('[Remote] Initial connection timed out');
-                        scheduleReconnect();
-                    }
-                }, 15000);
-            }
+
+            // Failsafe timeout: if connection stalls (e.g. PeerJS hangs), force retry
+            // This runs on EVERY attempt, ensuring we don't get stuck in 'loading' forever.
+            setTimeout(() => {
+                if (isStale()) return;
+                // If we are still trying to connect (loading) but haven't succeeded
+                if (state.screen === 'loading') {
+                    console.log('[Remote] Connection attempt timed out (10s), retrying...');
+                    scheduleReconnect();
+                }
+            }, 10000);
         }
 
         // Keep legacy name so the remote-ui HTML onclick="reconnect()" still works
         var initConnection = startConnection;
+
+        // --- Connection Maintenance ---
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                console.log('[Remote] App foregrounded');
+                // If disconnected or stuck, retry
+                if (state.screen !== 'connected' && !isConnecting) {
+                    console.log('[Remote] Triggering foreground reconnect');
+                    reconnect();
+                }
+            }
+        });
+
+        window.addEventListener('online', () => {
+            console.log('[Remote] Network online');
+            if (state.screen !== 'connected') {
+                reconnect();
+            }
+        });
 
         function initPeer(hostPeerId, attemptId) {
             const isStale = () => attemptId !== connectionAttemptId;
@@ -1849,7 +2096,7 @@
             });
 
             peer.on('open', (myId) => {
-                if (isStale()) { try { peer.destroy(); } catch(e) {} return; }
+                if (isStale()) { try { peer.destroy(); } catch (e) { } return; }
                 console.log('[Remote] My peer ID:', myId);
                 dataConn = peer.connect(hostPeerId, { reliable: true });
 
@@ -1958,6 +2205,33 @@
 
         // Init
         initTheme();
+
+        // Guest Mode Bridge Listeners
+        if (state.isInAppRemote) {
+            window.addEventListener('message', (event) => {
+                const { type, playlists, message } = event.data;
+                if (type === 'LOCAL_PLAYLISTS_UPDATED') {
+                    state.localPlaylists = playlists || [];
+                    console.log('[Remote] Local lib updated:', state.localPlaylists.length, 'collections');
+                    render();
+                } else if (type === 'TOAST') {
+                    showToast(message);
+                }
+            });
+            // Request initial data
+            window.parent.postMessage({ type: 'REQUEST_LOCAL_PLAYLISTS' }, '*');
+        }
+
+        // DEBUG: Verify InApp mode
+        setTimeout(() => {
+            if (state.isInAppRemote) {
+                showToast('Guest Mode detected');
+            } else {
+                // Show URL for debugging
+                showToast('Web Mode: ' + window.location.href);
+            }
+        }, 2000);
+
         render();
     </script>
 </body>

@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     namespace = "com.karaokenatin.app"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.karaokenatin.app"
         minSdk = 24
         targetSdk = 36

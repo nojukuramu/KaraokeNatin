@@ -111,7 +111,15 @@ pub async fn start_web_server() -> Result<(), String> {
 
 /// Serve the remote control UI
 async fn serve_index() -> impl IntoResponse {
-    Html(REMOTE_UI_HTML)
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html"),
+            (axum::http::header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
+            (axum::http::header::PRAGMA, "no-cache"),
+            (axum::http::header::EXPIRES, "0"),
+        ],
+        Html(REMOTE_UI_HTML),
+    )
 }
 
 /// Health check endpoint

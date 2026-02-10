@@ -4,6 +4,7 @@ import Player from './components/Player';
 import ControlPanel from './components/ControlPanel';
 import GuestMode from './components/GuestMode';
 import ModeSelect from './components/ModeSelect';
+import Library from './components/Library';
 import { useRoomState } from './hooks/useRoomState';
 import { usePeerHost } from './hooks/usePeerHost';
 import { invoke } from '@tauri-apps/api/core';
@@ -24,7 +25,7 @@ interface SearchResult {
   thumbnail: string;
 }
 
-type AppMode = 'select' | 'host' | 'guest';
+type AppMode = 'select' | 'host' | 'guest' | 'library';
 
 // ---- Host-mode wrapper (hooks only active when rendered) ----
 function HostView({ onBack }: { onBack: () => void }) {
@@ -175,6 +176,7 @@ function GuestView({ onBack }: { onBack: () => void }) {
   const handleGuestConnect = useCallback((hostUrl: string) => {
     const url = new URL(hostUrl);
     url.searchParams.set('mode', 'inapp');
+    url.searchParams.set('t', Date.now().toString()); // Bust WebView cache
     setGuestHostUrl(url.toString());
     setGuestIframeLoaded(false);
     setShowScanner(false);
@@ -184,6 +186,75 @@ function GuestView({ onBack }: { onBack: () => void }) {
     setGuestHostUrl(null);
     setGuestIframeLoaded(false);
     setShowScanner(true);
+  }, []);
+
+  // Bridge for Remote UI to access Native features (My Library)
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      // Security check: ensure message is from our iframe
+      if (!guestIframeRef.current || event.source !== guestIframeRef.current.contentWindow) {
+        return;
+      }
+
+      const { type, payload } = event.data;
+
+      try {
+        if (type === 'REQUEST_LOCAL_PLAYLISTS') {
+          const playlists = await invoke('get_playlists');
+          guestIframeRef.current.contentWindow?.postMessage({
+            type: 'LOCAL_PLAYLISTS_UPDATED',
+            playlists
+          }, '*');
+        }
+        else if (type === 'CREATE_LOCAL_COLLECTION') {
+          await invoke('playlist_create_collection', {
+            name: payload.name,
+            visibility: 'personal' // Guest collections are personal by default
+          });
+          // Refresh
+          const playlists = await invoke('get_playlists');
+          guestIframeRef.current.contentWindow?.postMessage({
+            type: 'LOCAL_PLAYLISTS_UPDATED',
+            playlists
+          }, '*');
+        }
+        else if (type === 'ADD_TO_LOCAL_PLAYLIST') {
+          await invoke('playlist_add_song', {
+            youtubeUrl: payload.youtubeUrl,
+            collectionId: payload.collectionId,
+            addedBy: 'Guest' // Or user's name if we had it, but 'Guest' is safer for now
+          });
+          // Refresh
+          const playlists = await invoke('get_playlists');
+          guestIframeRef.current.contentWindow?.postMessage({
+            type: 'LOCAL_PLAYLISTS_UPDATED',
+            playlists
+          }, '*');
+          // Also send success toast trigger
+          guestIframeRef.current.contentWindow?.postMessage({
+            type: 'TOAST',
+            message: 'Saved to library'
+          }, '*');
+        }
+        else if (type === 'REMOVE_FROM_LOCAL_PLAYLIST') {
+          await invoke('playlist_remove_song', {
+            collectionId: payload.collectionId,
+            songId: payload.songId
+          });
+          // Refresh
+          const playlists = await invoke('get_playlists');
+          guestIframeRef.current.contentWindow?.postMessage({
+            type: 'LOCAL_PLAYLISTS_UPDATED',
+            playlists
+          }, '*');
+        }
+      } catch (err) {
+        console.error('[GuestView] Bridge error:', err);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
   return (
@@ -240,11 +311,21 @@ function App() {
   const handleBack = useCallback(() => setAppMode('select'), []);
 
   if (appMode === 'select') {
-    return <ModeSelect onSelectHost={() => setAppMode('host')} onSelectGuest={() => setAppMode('guest')} />;
+    return (
+      <ModeSelect
+        onSelectHost={() => setAppMode('host')}
+        onSelectGuest={() => setAppMode('guest')}
+        onSelectLibrary={() => setAppMode('library')}
+      />
+    );
   }
 
   if (appMode === 'host') {
     return <HostView onBack={handleBack} />;
+  }
+
+  if (appMode === 'library') {
+    return <Library onBack={handleBack} />;
   }
 
   return <GuestView onBack={handleBack} />;

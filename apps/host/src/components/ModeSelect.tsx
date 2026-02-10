@@ -1,14 +1,15 @@
-import { Monitor, Smartphone, MicVocal } from 'lucide-react';
+import { Monitor, Smartphone, MicVocal, Library as LibraryIcon } from 'lucide-react';
 
 interface ModeSelectProps {
     onSelectHost: () => void;
     onSelectGuest: () => void;
+    onSelectLibrary: () => void;
 }
 
 /**
- * Landing screen — user picks Host or Guest mode.
+ * Landing screen — user picks Host, Guest, or Library mode.
  */
-export default function ModeSelect({ onSelectHost, onSelectGuest }: ModeSelectProps) {
+export default function ModeSelect({ onSelectHost, onSelectGuest, onSelectLibrary }: ModeSelectProps) {
     return (
         <div className="mode-select-screen">
             <h1 className="mode-select-logo"><MicVocal size={40} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.3em' }} /> KaraokeNatin</h1>
@@ -28,6 +29,14 @@ export default function ModeSelect({ onSelectHost, onSelectGuest }: ModeSelectPr
                     <span className="mode-card-title">Join as Guest</span>
                     <span className="mode-card-desc">
                         Scan a QR code or enter a URL to control a host in your network.
+                    </span>
+                </button>
+
+                <button className="mode-card" onClick={onSelectLibrary}>
+                    <LibraryIcon size={40} />
+                    <span className="mode-card-title">My Library</span>
+                    <span className="mode-card-desc">
+                        Manage your personal song collection, organize playlists, and search for new songs.
                     </span>
                 </button>
             </div>

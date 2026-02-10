@@ -7,16 +7,20 @@
 
 **Build Command**:
 ```powershell
-cd C:\Users\Noju\Projects\KaraokeNatin\apps\host
+# From project root:
+build.bat windows
+
+# Or manually:
+cd apps\host
 pnpm tauri build
 ```
 
 **Output**:
-- Windows: `src-tauri\target\release\bundle\msi\app_0.1.0_x64_en-US.msi`
-- Or `.exe` installer in `src-tauri\target\release\bundle\nsis\`
+- NSIS: `src-tauri\target\release\bundle\nsis\KaraokeNatin_0.2.0_x64-setup.exe`
+- MSI: `src-tauri\target\release\bundle\msi\KaraokeNatin_0.2.0_x64_en-US.msi`
 
 **Distribution**:
-- Share the `.msi` or `.exe` installer file
+- Share the `.exe` or `.msi` installer file
 - User installs it on their Windows PC
 - App runs locally, no internet required (except for YouTube)
 
@@ -26,34 +30,40 @@ pnpm tauri build
 **For**: Android phone/tablet host or Android TV
 
 **Prerequisites**:
-- Android Studio with SDK 24+ installed
-- Android NDK installed
-- Java 17+
-- Run `npx tauri android init` once to scaffold the Android project
+- Android SDK with platform 36 and build-tools 36
+- Android NDK 27
+- Java JDK 21+
+- [cargo-ndk](https://github.com/nickelc/cargo-ndk) (`cargo install cargo-ndk`)
+- Rust Android targets (`rustup target add aarch64-linux-android`)
 
-**Build Commands**:
+**Build Command**:
 ```powershell
-cd C:\Users\Noju\Projects\KaraokeNatin\apps\host
+# From project root:
+build.bat android
 
-# Debug APK
-pnpm tauri android build --debug
+# Or manually:
+cd apps\host\src-tauri
+cargo ndk -t arm64-v8a -o gen/android/app/src/main/jniLibs build --release --lib --features tauri/custom-protocol
+cd gen\android
+.\gradlew.bat assembleArm64Release -x rustBuildArm64Release -x rustBuildUniversalRelease
+```
 
-# Release APK/AAB
-pnpm tauri android build
+**Sign the APK**:
+```powershell
+build.bat sign
 ```
 
 **Output**:
-- Debug APK: `src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk`
-- Release AAB: `src-tauri/gen/android/app/build/outputs/bundle/release/app-release.aab`
+- Unsigned: `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk`
+- Signed: `KaraokeNatin-arm64-release.apk` (project root, after signing)
 
 **Distribution**:
 - Share the `.apk` for sideloading on phones/tablets
-- Upload the `.aab` to Google Play Store
-- For Android TV: ensure leanback launcher support in AndroidManifest
+- For Android TV: DPAD navigation is built in
 
 ---
 
-### 2. 📱 Web Client (Remote Control Website)
+### 3. 📱 Web Client (Remote Control Website)
 **For**: Karaoke singers accessing from their phones
 
 **Build Command**:
@@ -191,10 +201,16 @@ Then rebuild the desktop app.
 ## 📊 System Requirements
 
 ### Desktop Application
-- **OS**: Windows 10/11, macOS, Linux
+- **OS**: Windows 10/11
 - **RAM**: 4GB minimum
 - **Storage**: 500MB
 - **Network**: Internet for YouTube, local network for P2P
+
+### Android Application
+- **OS**: Android 7.0+ (API 24)
+- **Architecture**: arm64-v8a (most modern Android devices)
+- **RAM**: 2GB minimum
+- **Network**: Internet for YouTube, local Wi-Fi for P2P
 
 ### Web Client Users
 - **Device**: Any smartphone/tablet with modern browser
@@ -221,8 +237,8 @@ Then rebuild the desktop app.
 
 | Component | Type | Where to Deploy | Cost |
 |-----------|------|-----------------|------|
-| **Desktop App** | Installer | User's PC (Windows/macOS/Linux) | Free |
-| **Android App** | APK/AAB | Phone/Tablet/Android TV | Free |
+| **Desktop App** | Installer | User's PC (Windows) | Free |
+| **Android App** | APK | Phone/Tablet/Android TV | Free |
 | **Web Client** | Website | Vercel/Netlify | Free |
 | **Signaling Server** | Backend | Railway/Heroku | Free Tier |
 

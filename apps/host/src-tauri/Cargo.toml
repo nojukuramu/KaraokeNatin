@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 description = "KaraokeNatin - Karaoke party app with remote control"
 authors = ["KaraokeNatin"]
 license = "MIT"
@@ -33,13 +33,13 @@ tower-http = { version = "0.6", features = ["fs", "cors"] }
 local-ip-address = "0.6"
 dirs = "5"
 socketioxide = { version = "0.13", features = ["state"] }
-# Pure Rust YouTube integration - search + metadata, no external binaries needed
-rusty_ytdl = { version = "0.7", features = ["search"] }
+# Pure Rust YouTube integration - disable default-tls, use rustls-tls instead
+rusty_ytdl = { version = "0.7", default-features = false, features = ["search", "live", "rustls-tls"] }
 # Random port selection
 rand = "0.8"
-# Prevent multiple instances
-tauri-plugin-single-instance = "2"
 # File picker dialogs
 tauri-plugin-dialog = "2"
-# OpenSSL with vendored feature for cross-compilation
-openssl = { version = "0.10", features = ["vendored"] }
+
+# Desktop-only plugins (single-instance not supported on Android)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-single-instance = "2"

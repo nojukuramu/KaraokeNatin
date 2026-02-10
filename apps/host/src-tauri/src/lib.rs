@@ -26,14 +26,17 @@ pub fn run() {
         playlist_store.get_all(),
     );
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-                let _ = window.unminimize();
-            }
-        }))
-        .plugin(tauri_plugin_dialog::init())
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(not(target_os = "android"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let _ = app.get_webview_window("main").expect("no main window").set_focus();
+        }));
+    }
+
+    builder
         .manage(playlist_store)
         .manage(room_manager)
         .setup(|app| {

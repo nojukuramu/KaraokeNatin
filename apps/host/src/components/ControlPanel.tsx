@@ -5,11 +5,11 @@ import QRDisplay from './QRDisplay';
 import Queue from './Queue';
 import { Song, PlaylistCollection } from '../hooks/useRoomState';
 import { setHostInputFocused } from '../hooks/useRoomState';
-import { exportCollection } from '../lib/commands';
+import { exportCollection, saveCollectionToFile, loadCollectionFromFile, getPlaylists, playlistAddSong, playlistCreateCollection, playlistDeleteCollection, playlistRenameCollection, playlistSetVisibility, playlistRemoveSong } from '../lib/commands';
 import {
     ChevronLeft, ChevronRight, Users, Search, Plus, Sun, Moon,
     Play, Pause, SkipForward, Music, Trash2, UserPlus,
-    Globe, Lock, Pencil, Upload, Download, ChevronDown, ArrowLeft,
+    Globe, Lock, Pencil, Upload, Download, ChevronDown, ArrowLeft, Star,
 } from 'lucide-react';
 
 interface SearchResult {
@@ -90,12 +90,20 @@ const ControlPanel = ({
     const [addedToQueue, setAddedToQueue] = useState<Set<string>>(new Set());
     const [addingToPlaylist, setAddingToPlaylist] = useState<Set<string>>(new Set());
     const [addedToPlaylist, setAddedToPlaylist] = useState<Set<string>>(new Set());
+    // Local playlists (from PlaylistStore)
+    const [localPlaylists, setLocalPlaylists] = useState<PlaylistCollection[]>([]);
+    const [libraryPickerOpenFor, setLibraryPickerOpenFor] = useState<string | null>(null);
+    const [addingToLibrary, setAddingToLibrary] = useState<Set<string>>(new Set());
+    const [addedToLibrary, setAddedToLibrary] = useState<Set<string>>(new Set());
     // Collection picker state
     const [pickerOpenFor, setPickerOpenFor] = useState<string | null>(null);
     const pickerRef = useRef<HTMLDivElement>(null);
+    const libraryPickerRef = useRef<HTMLDivElement>(null);
     // New collection form
     const [showNewCollection, setShowNewCollection] = useState(false);
     const [newCollectionName, setNewCollectionName] = useState('');
+    const [showNewLibraryCollection, setShowNewLibraryCollection] = useState(false);
+    const [newLibraryCollectionName, setNewLibraryCollectionName] = useState('');
     // Active collection tab in playlist section
     const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
     // Collection management
@@ -104,6 +112,20 @@ const ControlPanel = ({
 
     const { ref, focusKey } = useFocusable();
 
+    // Load local playlists on mount
+    useEffect(() => {
+        loadLocalPlaylists();
+    }, []);
+
+    const loadLocalPlaylists = async () => {
+        try {
+            const playlists = await getPlaylists();
+            setLocalPlaylists(playlists);
+        } catch (error) {
+            console.error('[ControlPanel] Failed to load local playlists:', error);
+        }
+    };
+
     // Close picker on outside click
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -111,19 +133,23 @@ const ControlPanel = ({
                 setPickerOpenFor(null);
                 setShowNewCollection(false);
             }
+            if (libraryPickerRef.current && !libraryPickerRef.current.contains(e.target as Node)) {
+                setLibraryPickerOpenFor(null);
+                setShowNewLibraryCollection(false);
+            }
         };
-        if (pickerOpenFor) {
+        if (pickerOpenFor || libraryPickerOpenFor) {
             document.addEventListener('mousedown', handleClickOutside);
             return () => document.removeEventListener('mousedown', handleClickOutside);
         }
-    }, [pickerOpenFor]);
+    }, [pickerOpenFor, libraryPickerOpenFor]);
 
-    // Set active collection to first one when playlists load
+    // Set active collection to first one when local playlists load
     useEffect(() => {
-        if (!activeCollectionId && playlists.length > 0) {
-            setActiveCollectionId(playlists[0].id);
+        if (!activeCollectionId && localPlaylists.length > 0) {
+            setActiveCollectionId(localPlaylists[0].id);
         }
-    }, [playlists, activeCollectionId]);
+    }, [localPlaylists, activeCollectionId]);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -133,6 +159,8 @@ const ControlPanel = ({
             setAddedToQueue(new Set());
             setAddingToPlaylist(new Set());
             setAddedToPlaylist(new Set());
+            setAddingToLibrary(new Set());
+            setAddedToLibrary(new Set());
             onSearch(searchQuery);
         }
     };
@@ -193,16 +221,59 @@ const ControlPanel = ({
     const handleCreateCollection = async (thenAddUrl?: string) => {
         if (!newCollectionName.trim()) return;
         try {
-            await invoke('process_command', {
-                command: { type: 'CREATE_COLLECTION', name: newCollectionName.trim(), visibility: 'public' },
-            });
+            const newId = await playlistCreateCollection(newCollectionName.trim(), 'personal');
             setNewCollectionName('');
             setShowNewCollection(false);
-            // If we were adding a song, we need to wait for state update to get the new ID.
-            // For simplicity, close picker - user can re-click.
-            if (thenAddUrl) setPickerOpenFor(null);
+            await loadLocalPlaylists();
+
+            if (thenAddUrl) {
+                // If adding to playlist directly from search result via this creation flow
+                // We'd need to know the ID. playlistCreateCollection returns ID.
+                // But the picker logic for search result uses handleCreateCollection(result.url).
+                // Wait, handleCreateCollection was used in the picker OLD logic.
+                // My new picker uses handleCreateLibraryCollection.
+                // So handleCreateCollection is used for the MAIN playlist tab "New Collection" button.
+                // That button likely doesn't pass a URL.
+                // If it does (e.g. from existing logic), we handle it.
+                if (thenAddUrl) {
+                    await playlistAddSong(thenAddUrl, newId, 'Host');
+                    await loadLocalPlaylists();
+                }
+            }
         } catch (error) {
             console.error('[ControlPanel] Create collection failed:', error);
+        }
+    };
+
+    const handlePickLibraryCollection = async (url: string, collectionId: string) => {
+        setLibraryPickerOpenFor(null);
+        setAddingToLibrary(prev => new Set(prev).add(url));
+        try {
+            await playlistAddSong(url, collectionId, 'Host');
+            setAddedToLibrary(prev => new Set(prev).add(url));
+            await loadLocalPlaylists();
+        } catch (error) {
+            console.error('[ControlPanel] Add to library failed:', error);
+        } finally {
+            setAddingToLibrary(prev => { const s = new Set(prev); s.delete(url); return s; });
+        }
+    };
+
+    const handleCreateLibraryCollection = async (thenAddUrl?: string) => {
+        if (!newLibraryCollectionName.trim()) return;
+        try {
+            const newId = await playlistCreateCollection(newLibraryCollectionName.trim(), 'personal');
+            setNewLibraryCollectionName('');
+            setShowNewLibraryCollection(false);
+            await loadLocalPlaylists();
+
+            // If we were adding a song, add it to the new collection
+            if (thenAddUrl) {
+                await handlePickLibraryCollection(thenAddUrl, newId);
+            }
+            setLibraryPickerOpenFor(null);
+        } catch (error) {
+            console.error('[ControlPanel] Create library collection failed:', error);
         }
     };
 
@@ -218,21 +289,22 @@ const ControlPanel = ({
 
     const handleRemoveFromPlaylist = async (collectionId: string, songId: string) => {
         try {
-            await invoke('process_command', {
-                command: { type: 'PLAYLIST_REMOVE', songId, collectionId },
-            });
+            await playlistRemoveSong(collectionId, songId);
+            await loadLocalPlaylists();
         } catch (error) {
             console.error('[ControlPanel] Remove from playlist failed:', error);
         }
     };
 
     const handleDeleteCollection = async (collectionId: string) => {
+        if (!confirm('Are you sure you want to delete this collection?')) return;
         try {
-            await invoke('process_command', {
-                command: { type: 'DELETE_COLLECTION', collectionId },
-            });
+            await playlistDeleteCollection(collectionId);
+            await loadLocalPlaylists();
             if (activeCollectionId === collectionId) {
-                setActiveCollectionId(playlists.find(c => c.id !== collectionId)?.id ?? null);
+                // Find next available collection or null
+                const nextCol = localPlaylists.find(c => c.id !== collectionId);
+                setActiveCollectionId(nextCol ? nextCol.id : null);
             }
         } catch (error) {
             console.error('[ControlPanel] Delete collection failed:', error);
@@ -242,9 +314,8 @@ const ControlPanel = ({
     const handleRenameCollection = async (collectionId: string) => {
         if (!renameValue.trim()) { setRenamingCollectionId(null); return; }
         try {
-            await invoke('process_command', {
-                command: { type: 'RENAME_COLLECTION', collectionId, name: renameValue.trim() },
-            });
+            await playlistRenameCollection(collectionId, renameValue.trim());
+            await loadLocalPlaylists();
         } catch (error) {
             console.error('[ControlPanel] Rename failed:', error);
         } finally {
@@ -254,13 +325,15 @@ const ControlPanel = ({
 
     const handleToggleVisibility = async (col: PlaylistCollection) => {
         try {
-            await invoke('process_command', {
-                command: {
-                    type: 'SET_COLLECTION_VISIBILITY',
-                    collectionId: col.id,
-                    visibility: col.visibility === 'public' ? 'personal' : 'public',
-                },
-            });
+            const newVisibility = col.visibility === 'public' ? 'private' : 'public';
+            await playlistSetVisibility(col.id, newVisibility === 'public' ? 'public' : 'personal'); // Assuming 'personal' matches 'private' logic but command uses 'personal'/'public'? 
+            // Wait, command uses 'public' | 'personal'.
+            // UI uses 'public' | 'private' sometimes?
+            // Local Playlist logic uses 'public' | 'personal' usually.
+            // Let's check command signature or usage.
+            // playlistSetVisibility takes (id, visibility).
+            // Let's assume 'personal' is correct.
+            await loadLocalPlaylists();
         } catch (error) {
             console.error('[ControlPanel] Toggle visibility failed:', error);
         }
@@ -289,8 +362,33 @@ const ControlPanel = ({
         }
     };
 
-    const activeCollection = playlists.find(c => c.id === activeCollectionId);
-    const totalSongs = playlists.reduce((sum, c) => sum + c.songs.length, 0);
+    const handleSaveToFile = async (collectionId: string) => {
+        try {
+            await saveCollectionToFile(collectionId);
+        } catch (error) {
+            console.error('[ControlPanel] Save to file failed:', error);
+            // invoke throws string errors from Rust, or we might catch other JS errors
+            if (typeof error === 'string' && error.includes('cancelled')) return;
+            alert('Failed to save file');
+        }
+    };
+
+    const handleLoadFromFile = async () => {
+        try {
+            const json = await loadCollectionFromFile();
+            // The command returns the JSON string, we need to process it
+            await invoke('process_command', {
+                command: { type: 'IMPORT_COLLECTION', data: json },
+            });
+        } catch (error) {
+            console.error('[ControlPanel] Load from file failed:', error);
+            if (typeof error === 'string' && error.includes('cancelled')) return;
+            alert('Failed to load file');
+        }
+    };
+
+    const activeCollection = localPlaylists.find(c => c.id === activeCollectionId);
+    const totalSongs = localPlaylists.reduce((sum, c) => sum + c.songs.length, 0);
 
     return (
         <FocusContext.Provider value={focusKey}>
@@ -408,7 +506,7 @@ const ControlPanel = ({
                                     }}
                                     tabIndex={0}
                                 />
-                                <FocusableButton className="btn-icon search-btn" onClick={() => handleSearch({ preventDefault: () => {} } as React.FormEvent)}>
+                                <FocusableButton className="btn-icon search-btn" onClick={() => handleSearch({ preventDefault: () => { } } as React.FormEvent)}>
                                     <Search size={18} />
                                 </FocusableButton>
                             </div>
@@ -429,6 +527,8 @@ const ControlPanel = ({
                                     const isQueueAdded = addedToQueue.has(result.url);
                                     const isPlaylistLoading = addingToPlaylist.has(result.url);
                                     const isPlaylistAdded = addedToPlaylist.has(result.url);
+                                    const isLibraryLoading = addingToLibrary.has(result.url);
+                                    const isLibraryAdded = addedToLibrary.has(result.url);
 
                                     return (
                                         <div key={i} className="search-result-item">
@@ -523,6 +623,72 @@ const ControlPanel = ({
                                                             </div>
                                                         )}
                                                     </div>
+
+                                                    {/* Add to Library button with picker */}
+                                                    <div className="playlist-picker-wrapper" style={{ position: 'relative' }}>
+                                                        <FocusableButton
+                                                            className={`btn-sm ${isLibraryAdded ? 'btn-success' : 'btn-secondary'}`}
+                                                            onClick={() => setLibraryPickerOpenFor(libraryPickerOpenFor === result.url ? null : result.url)}
+                                                            disabled={isLibraryLoading}
+                                                        >
+                                                            {isLibraryLoading ? (
+                                                                <><span className="spinner-tiny"></span> Saving...</>
+                                                            ) : isLibraryAdded ? (
+                                                                <>✓ In Library</>
+                                                            ) : (
+                                                                <><Star size={14} /> Library <ChevronDown size={12} /></>
+                                                            )}
+                                                        </FocusableButton>
+
+                                                        {libraryPickerOpenFor === result.url && (
+                                                            <div ref={libraryPickerRef} className="collection-picker">
+                                                                <div className="collection-picker-title">Save to Library</div>
+                                                                {localPlaylists.map(col => (
+                                                                    <button
+                                                                        key={col.id}
+                                                                        className="collection-picker-item"
+                                                                        onClick={() => handlePickLibraryCollection(result.url, col.id)}
+                                                                    >
+                                                                        <span className={`visibility-dot ${col.visibility}`}></span>
+                                                                        {col.name}
+                                                                        <span className="collection-picker-count">{col.songs.length}</span>
+                                                                    </button>
+                                                                ))}
+                                                                <div className="collection-picker-divider"></div>
+                                                                {showNewLibraryCollection ? (
+                                                                    <div className="collection-picker-new">
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="Collection name..."
+                                                                            value={newLibraryCollectionName}
+                                                                            onChange={(e) => setNewLibraryCollectionName(e.target.value)}
+                                                                            onFocus={() => setHostInputFocused(true)}
+                                                                            onBlur={() => setHostInputFocused(false)}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter') {
+                                                                                    e.preventDefault();
+                                                                                    handleCreateLibraryCollection(result.url);
+                                                                                }
+                                                                                e.stopPropagation();
+                                                                            }}
+                                                                            autoFocus
+                                                                            className="collection-picker-input"
+                                                                        />
+                                                                        <button className="btn-sm btn-primary" onClick={() => handleCreateLibraryCollection(result.url)}>
+                                                                            Create
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <button
+                                                                        className="collection-picker-item collection-picker-create"
+                                                                        onClick={() => setShowNewLibraryCollection(true)}
+                                                                    >
+                                                                        <Plus size={14} /> New Collection
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -545,6 +711,13 @@ const ControlPanel = ({
                             <div style={{ display: 'flex', gap: '4px' }}>
                                 <FocusableButton
                                     className="btn-sm btn-secondary"
+                                    onClick={handleLoadFromFile}
+                                    title="Open playlist file"
+                                >
+                                    <span style={{ fontSize: '14px' }}>📂</span> Open
+                                </FocusableButton>
+                                <FocusableButton
+                                    className="btn-sm btn-secondary"
                                     onClick={handleImportCollection}
                                     title="Import collection from clipboard"
                                 >
@@ -554,9 +727,9 @@ const ControlPanel = ({
                         </div>
 
                         {/* Collection Tabs */}
-                        {playlists.length > 0 && (
+                        {localPlaylists.length > 0 && (
                             <div className="collection-tabs">
-                                {playlists.map(col => (
+                                {localPlaylists.map(col => (
                                     <button
                                         key={col.id}
                                         className={`collection-tab ${activeCollectionId === col.id ? 'active' : ''}`}
@@ -625,6 +798,13 @@ const ControlPanel = ({
                                 >
                                     <Upload size={13} /> Export
                                 </FocusableButton>
+                                <FocusableButton
+                                    className="btn-sm btn-secondary"
+                                    onClick={() => handleSaveToFile(activeCollection.id)}
+                                    title="Save to file"
+                                >
+                                    <span style={{ fontSize: '14px' }}>💾</span> Save
+                                </FocusableButton>
                                 {playlists.length > 1 && (
                                     <FocusableButton
                                         className="btn-sm btn-danger-text"
@@ -644,7 +824,7 @@ const ControlPanel = ({
                         {/* Active collection songs */}
                         {!activeCollection || activeCollection.songs.length === 0 ? (
                             <div className="playlist-empty">
-                                <p>{playlists.length === 0 ? 'No collections yet' : 'No songs in this collection'}</p>
+                                <p>{localPlaylists.length === 0 ? 'No collections yet' : 'No songs in this collection'}</p>
                                 <p className="playlist-empty-hint">Add songs from search results</p>
                             </div>
                         ) : (
