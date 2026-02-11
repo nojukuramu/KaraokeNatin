@@ -5,17 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0-beta] - 2026-02-10 "The Cross-Platform Polish"
-
-### 🚀 What's New
-- **Full Android Support (BETA)**: Host sessions directly from Android devices (Phones, Tablets, Android TV).
-- **Refined Playlist Management**: Persistent library, import/export playlists.
-- **TV Optimized**: Full spatial navigation (DPAD) support.
-
-### Fixed
-- Fixed playlist collections failing to import and save correctly.
-- Resolved "double padding" issue in Remote UI.
-- Added missing iconography for "Save to Library".
+## [0.2.0] - 2026-02-10
 
 ### Added
 - **Unified Build System**: Local `build.bat` for Android/Windows.
