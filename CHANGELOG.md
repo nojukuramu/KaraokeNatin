@@ -8,12 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-02-10
 
 ### Added
-- **Unified Build System**: Local `build.bat` for Android/Windows.
-- **APK Signing**: Automated zipalign/apksigner.
+- **Working Playlist Collections**: Playlist collections now work properly.
+- **Android Support**: Android devices can now host sessions and join as a guest.
+- **TV Support**: Android TV devices can now be used to host session.
 
-### Changed
-- Replaced OpenSSL with rustls for pure Rust TLS.
-- Conditional single-instance plugin (desktop only).
+### Note
+- ** Android and Android TV should be installed by side loading.**: Future release will have Google Play Store support.
 
 ## [0.1.3-beta] - 2025-12-01
 
