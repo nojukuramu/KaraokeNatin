@@ -5,28 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1-beta] - 2026-02-10
+## [0.2.0-beta] - 2026-02-10 "The Cross-Platform Polish"
+
+### 🚀 What's New
+- **Full Android Support (BETA)**: Host sessions directly from Android devices (Phones, Tablets, Android TV).
+- **Refined Playlist Management**: Persistent library, import/export playlists.
+- **TV Optimized**: Full spatial navigation (DPAD) support.
 
 ### Fixed
-- Fixed playlist collections failing to import and save correctly from the Library screen.
-- Resolved "double padding" issue in Remote UI on notched mobile devices and Android TV.
-- Added missing iconography and CSS styling for "Save to Library" dropdown menus in the remote interface.
-
-## [0.2.0] - 2026-02-08
+- Fixed playlist collections failing to import and save correctly.
+- Resolved "double padding" issue in Remote UI.
+- Added missing iconography for "Save to Library".
 
 ### Added
-- **Android support** — KaraokeNatin now builds and runs on Android (arm64). APKs can be installed on phones, tablets, and Android TV.
-- **Local build script** (`build.bat`) — unified script to build Android APK and Windows installers from one machine.
-- **APK signing** — automated zipalign + apksigner workflow for release APKs.
-- **Android TV DPAD navigation** — spatial navigation support for big-screen Android TV experience.
+- **Unified Build System**: Local `build.bat` for Android/Windows.
+- **APK Signing**: Automated zipalign/apksigner.
 
 ### Changed
-- **Replaced OpenSSL with rustls** — all network dependencies (`reqwest`, `rusty_ytdl`) now use pure Rust TLS, eliminating cross-compilation issues on Windows→Android.
-- **Conditional single-instance plugin** — `tauri-plugin-single-instance` is now desktop-only (`cfg(not(target_os = "android"))`), since it's unsupported on Android.
-- **Build tooling switched to local** — removed GitHub Actions CI/CD in favor of local builds with `cargo-ndk` + Gradle.
-
-### Removed
-- **GitHub Actions workflow** (`build-release.yml`) — CI/CD pipeline removed; builds are now done locally.
+- Replaced OpenSSL with rustls for pure Rust TLS.
+- Conditional single-instance plugin (desktop only).
 
 ## [0.1.3-beta] - 2025-12-01
 

@@ -17,6 +17,9 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 - 🔐 **Simple Connection** — Just scan a QR code to join
 
 ### For Hosts
+- 📱 **Full Android Support (BETA)** — Host from Android phones, tablets, and TV
+- 📺 **TV Optimized** — Full spatial navigation (DPAD) support
+- 💿 **Refined Playlist Management** — Persistent library with import/export
 - 🖥️ **Windows & Android** — Run on Windows PCs, Android phones, tablets, or Android TV
 - 📺 **Android TV Support** — DPAD navigation for big-screen experience
 - 🎬 **YouTube Integration** — Play any karaoke video directly from YouTube
@@ -31,6 +34,7 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 Check the [Releases](https://github.com/nojukuramu/KaraokeNatin/releases) page for:
 - **Windows** — `.exe` (NSIS) or `.msi` installer
 - **Android** — `.apk` for phones, tablets, and Android TV (arm64)
+- *Note for Android TV*: You may need to use a file manager app to install the APK once downloaded.
 
 ### Build from Source
 See [Building](#-building-from-source) below.
@@ -141,7 +145,7 @@ KaraokeNatin/
 3. Submit a pull request with a clear description
 
 ### Report Issues
-Found a bug? [Open an issue](https://github.com/nojukuramu/KaraokeNatin/issues/new) — we appreciate detailed reports and thoughtful suggestions.
+Found a bug? Help us improve by reporting it on our [Issue Tracker](https://github.com/nojukuramu/KaraokeNatin/issues).
 
 ## 📄 License
 

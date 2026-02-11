@@ -30,6 +30,7 @@ Thumbs.db
 .env
 .env.local
 .env.production
+todo.node_modules
 
 # Next.js
 .next/

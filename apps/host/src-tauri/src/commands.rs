@@ -481,6 +481,7 @@ pub async fn save_collection_to_file(
     app: AppHandle,
 ) -> Result<(), String> {
     let json = playlists.export_collection(&collection_id)?;
+    log::info!("Exporting collection {} (JSON length: {})", collection_id, json.len());
     
     // Get a suggested filename from collection name
     let all = playlists.get_all();
@@ -498,8 +499,16 @@ pub async fn save_collection_to_file(
         .blocking_save_file();
     
     if let Some(file_path) = path {
-        std::fs::write(file_path.as_path().unwrap(), &json)
+        let p = file_path.as_path().unwrap();
+        log::info!("Saving collection to: {:?}", p);
+        std::fs::write(p, &json)
             .map_err(|e| format!("Failed to write file: {}", e))?;
+        
+        // Final verification check
+        if let Ok(metadata) = std::fs::metadata(p) {
+            log::info!("Verified saved file size: {} bytes", metadata.len());
+        }
+        
         Ok(())
     } else {
         Err("Save cancelled".into())

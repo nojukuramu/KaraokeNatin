@@ -5,7 +5,7 @@ import QRDisplay from './QRDisplay';
 import Queue from './Queue';
 import { Song, PlaylistCollection } from '../hooks/useRoomState';
 import { setHostInputFocused } from '../hooks/useRoomState';
-import { exportCollection, saveCollectionToFile, loadCollectionFromFile, getPlaylists, playlistAddSong, playlistCreateCollection, playlistDeleteCollection, playlistRenameCollection, playlistSetVisibility, playlistRemoveSong } from '../lib/commands';
+import { saveCollectionToFile, loadCollectionFromFile, getPlaylists, playlistAddSong, playlistCreateCollection, playlistDeleteCollection, playlistRenameCollection, playlistSetVisibility, playlistRemoveSong } from '../lib/commands';
 import {
     ChevronLeft, ChevronRight, Users, Search, Plus, Sun, Moon,
     Play, Pause, SkipForward, Music, Trash2, UserPlus,
@@ -339,28 +339,7 @@ const ControlPanel = ({
         }
     };
 
-    const handleExportCollection = async (collectionId: string) => {
-        try {
-            const json = await exportCollection(collectionId);
-            await navigator.clipboard.writeText(json);
-            alert('Collection copied to clipboard!');
-        } catch (error) {
-            console.error('[ControlPanel] Export failed:', error);
-            alert('Export failed');
-        }
-    };
 
-    const handleImportCollection = async () => {
-        try {
-            const text = await navigator.clipboard.readText();
-            await invoke('process_command', {
-                command: { type: 'IMPORT_COLLECTION', data: text },
-            });
-        } catch (error) {
-            console.error('[ControlPanel] Import failed:', error);
-            alert('Import failed. Make sure you have a valid collection JSON in your clipboard.');
-        }
-    };
 
     const handleSaveToFile = async (collectionId: string) => {
         try {
@@ -375,11 +354,8 @@ const ControlPanel = ({
 
     const handleLoadFromFile = async () => {
         try {
-            const json = await loadCollectionFromFile();
-            // The command returns the JSON string, we need to process it
-            await invoke('process_command', {
-                command: { type: 'IMPORT_COLLECTION', data: json },
-            });
+            await loadCollectionFromFile();
+            await loadLocalPlaylists();
         } catch (error) {
             console.error('[ControlPanel] Load from file failed:', error);
             if (typeof error === 'string' && error.includes('cancelled')) return;
@@ -712,14 +688,7 @@ const ControlPanel = ({
                                 <FocusableButton
                                     className="btn-sm btn-secondary"
                                     onClick={handleLoadFromFile}
-                                    title="Open playlist file"
-                                >
-                                    <span style={{ fontSize: '14px' }}>📂</span> Open
-                                </FocusableButton>
-                                <FocusableButton
-                                    className="btn-sm btn-secondary"
-                                    onClick={handleImportCollection}
-                                    title="Import collection from clipboard"
+                                    title="Import playlist file"
                                 >
                                     <Download size={13} /> Import
                                 </FocusableButton>
@@ -793,17 +762,10 @@ const ControlPanel = ({
                                 </FocusableButton>
                                 <FocusableButton
                                     className="btn-sm btn-secondary"
-                                    onClick={() => handleExportCollection(activeCollection.id)}
-                                    title="Export to clipboard"
+                                    onClick={() => handleSaveToFile(activeCollection.id)}
+                                    title="Export to file"
                                 >
                                     <Upload size={13} /> Export
-                                </FocusableButton>
-                                <FocusableButton
-                                    className="btn-sm btn-secondary"
-                                    onClick={() => handleSaveToFile(activeCollection.id)}
-                                    title="Save to file"
-                                >
-                                    <span style={{ fontSize: '14px' }}>💾</span> Save
                                 </FocusableButton>
                                 {playlists.length > 1 && (
                                     <FocusableButton
@@ -860,7 +822,7 @@ const ControlPanel = ({
                     </div>
                 </div>
             </div>
-        </FocusContext.Provider>
+        </FocusContext.Provider >
     );
 };
 

@@ -10,10 +10,8 @@ import {
     playlistSetVisibility,
     playlistAddSong,
     playlistRemoveSong,
-    exportCollection,
     saveCollectionToFile,
-    loadCollectionFromFile,
-    playlistImportCollection
+    loadCollectionFromFile
 } from '../lib/commands';
 import { setHostInputFocused } from '../hooks/useRoomState';
 
@@ -190,16 +188,7 @@ export default function Library({ onBack }: LibraryProps) {
         }
     };
 
-    const handleExportCollection = async (collectionId: string) => {
-        try {
-            const json = await exportCollection(collectionId);
-            await navigator.clipboard.writeText(json);
-            alert('Collection copied to clipboard!');
-        } catch (error) {
-            console.error('[Library] Export failed:', error);
-            alert('Export failed');
-        }
-    };
+
 
     const handleSaveToFile = async (collectionId: string) => {
         try {
@@ -213,8 +202,7 @@ export default function Library({ onBack }: LibraryProps) {
 
     const handleLoadFromFile = async () => {
         try {
-            const json = await loadCollectionFromFile();
-            await playlistImportCollection(json);
+            await loadCollectionFromFile();
             await loadCollections();
         } catch (error) {
             console.error('[Library] Load from file failed:', error);
@@ -377,7 +365,7 @@ export default function Library({ onBack }: LibraryProps) {
                                 onClick={handleLoadFromFile}
                                 title="Import from file"
                             >
-                                📂 Open
+                                <Upload size={14} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '4px' }} /> Import
                             </button>
                         </div>
                     </div>
@@ -488,17 +476,10 @@ export default function Library({ onBack }: LibraryProps) {
                             </button>
                             <button
                                 className="btn-sm btn-secondary"
-                                onClick={() => handleExportCollection(activeCollection.id)}
-                                title="Export to clipboard"
+                                onClick={() => handleSaveToFile(activeCollection.id)}
+                                title="Export to file"
                             >
                                 <Upload size={13} /> Export
-                            </button>
-                            <button
-                                className="btn-sm btn-secondary"
-                                onClick={() => handleSaveToFile(activeCollection.id)}
-                                title="Save to file"
-                            >
-                                💾 Save
                             </button>
                             {collections.length > 1 && (
                                 <button

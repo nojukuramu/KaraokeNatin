@@ -48,6 +48,23 @@ pub fn run() {
                 )?;
             }
 
+            // Initialize PlaylistStore with persistent path
+            let app_handle = app.handle();
+            let playlist_store = app_handle.state::<PlaylistStore>();
+            let room_manager = app_handle.state::<RoomStateManager>();
+            
+            match app.path().app_local_data_dir() {
+                Ok(path) => {
+                    log::info!("Resolved app local data dir: {:?}", path);
+                    let loaded_playlists = playlist_store.initialize(path);
+                    
+                    // Sync initial playlists to RoomStateManager
+                    let mut state = room_manager.write();
+                    state.sync_playlists(loaded_playlists);
+                }
+                Err(e) => log::error!("Failed to resolve app local data dir: {}", e),
+            }
+
             // NOTE: Web server is now started lazily via start_host_server command
             // when the user picks Host Mode from the landing screen.
 

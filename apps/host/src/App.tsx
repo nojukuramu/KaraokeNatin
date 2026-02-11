@@ -248,6 +248,26 @@ function GuestView({ onBack }: { onBack: () => void }) {
             playlists
           }, '*');
         }
+        else if (type === 'IMPORT_LOCAL_PLAYLIST') {
+          const json = await invoke<string>('load_collection_from_file');
+          if (json) {
+            await invoke('playlist_import_collection', { json });
+            const playlists = await invoke('get_playlists');
+            guestIframeRef.current.contentWindow?.postMessage({
+              type: 'LOCAL_PLAYLISTS_UPDATED',
+              playlists
+            }, '*');
+            guestIframeRef.current.contentWindow?.postMessage({
+              type: 'TOAST',
+              message: 'Collection imported'
+            }, '*');
+          }
+        }
+        else if (type === 'EXPORT_LOCAL_PLAYLIST') {
+          await invoke('save_collection_to_file', {
+            collectionId: payload.collectionId
+          });
+        }
       } catch (err) {
         console.error('[GuestView] Bridge error:', err);
       }

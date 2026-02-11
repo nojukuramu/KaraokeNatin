@@ -1239,6 +1239,8 @@
             globe: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>',
             lock: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
             save: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+            export: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>',
+            import: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
             x: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
         };
 
@@ -1701,9 +1703,17 @@
                             ${state.localPlaylists.length} Collections • ${activeCollection.songs.length} Songs Total
                         </div>
                     </div>
-                    <button class="icon-btn" onclick="createLocalCollection()" title="New Collection">
-                        ${icons.plus}
-                    </button>
+                    <div class="header-actions" style="display: flex; gap: 4px;">
+                        <button class="icon-btn" onclick="importLibrary()" title="Import Collection">
+                            ${icons.import}
+                        </button>
+                        <button class="icon-btn" onclick="exportLibrary('${activeCollection.id}')" title="Export Collection">
+                            ${icons.export}
+                        </button>
+                        <button class="icon-btn" onclick="createLocalCollection()" title="New Collection">
+                            ${icons.plus}
+                        </button>
+                    </div>
                 </section>
                 
                 <div class="search-bar" style="margin: 0 16px 16px; position: sticky; top: -1px; background: var(--bg-primary); z-index: 10; padding: 8px 0;">
@@ -1892,6 +1902,17 @@
             window.parent.postMessage({
                 type: 'REMOVE_FROM_LOCAL_PLAYLIST',
                 payload: { collectionId, songId }
+            }, '*');
+        }
+
+        function importLibrary() {
+            window.parent.postMessage({ type: 'IMPORT_LOCAL_PLAYLIST' }, '*');
+        }
+
+        function exportLibrary(collectionId) {
+            window.parent.postMessage({
+                type: 'EXPORT_LOCAL_PLAYLIST',
+                payload: { collectionId }
             }, '*');
         }
 

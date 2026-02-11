@@ -4,98 +4,35 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use std::fs;
 
-/// Get the data directory for KaraokeNatin
-fn get_data_dir() -> PathBuf {
-    let base = dirs::data_local_dir()
-        .or_else(|| dirs::data_dir())
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
-    let mut path = base;
-    path.push("KaraokeNatin");
-    fs::create_dir_all(&path).ok();
-    path
-}
-
-/// Get the playlists file path
-fn get_playlists_path() -> PathBuf {
-    let mut path = get_data_dir();
-    path.push("playlists.json");
-    path
-}
-
-/// Get the legacy playlist file path (for migration)
-fn get_legacy_playlist_path() -> PathBuf {
-    let mut path = get_data_dir();
-    path.push("playlist.json");
-    path
-}
-
-/// Load playlists from file, with migration from legacy format
-fn load_playlists_from_file() -> Vec<PlaylistCollection> {
-    let path = get_playlists_path();
-    
-    // Try loading new format first
+/// Load playlists from file
+fn load_playlists_from_file(path: &PathBuf) -> Vec<PlaylistCollection> {
     if path.exists() {
-        match fs::read_to_string(&path) {
+        match fs::read_to_string(path) {
             Ok(content) => {
                 match serde_json::from_str::<Vec<PlaylistCollection>>(&content) {
                     Ok(playlists) => {
                         let total_songs: usize = playlists.iter().map(|c| c.songs.len()).sum();
-                        log::info!("Loaded {} collections ({} total songs) from playlists file", playlists.len(), total_songs);
+                        log::info!("Loaded {} collections ({} total songs) from playlists file: {:?}", playlists.len(), total_songs, path);
                         return playlists;
                     }
-                    Err(e) => log::error!("Failed to parse playlists file: {}", e),
+                    Err(e) => log::error!("Failed to parse playlists file {:?}: {}", path, e),
                 }
             }
-            Err(e) => log::error!("Failed to read playlists file: {}", e),
+            Err(e) => log::error!("Failed to read playlists file {:?}: {}", path, e),
         }
     }
-    
-    // Try migrating from legacy playlist.json
-    let legacy_path = get_legacy_playlist_path();
-    if legacy_path.exists() {
-        log::info!("Found legacy playlist.json, migrating to collections format...");
-        match fs::read_to_string(&legacy_path) {
-            Ok(content) => {
-                match serde_json::from_str::<Vec<Song>>(&content) {
-                    Ok(songs) => {
-                        let now = chrono::Utc::now().timestamp_millis();
-                        let default_collection = PlaylistCollection {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name: "Default Playlist".to_string(),
-                            visibility: CollectionVisibility::Public,
-                            songs,
-                            created_at: now,
-                            updated_at: now,
-                        };
-                        let playlists = vec![default_collection];
-                        save_playlists_to_file(&playlists);
-                        // Remove legacy file after successful migration
-                        let _ = fs::remove_file(&legacy_path);
-                        log::info!("Migration complete: {} songs moved to 'Default Playlist'", playlists[0].songs.len());
-                        return playlists;
-                    }
-                    Err(e) => log::error!("Failed to parse legacy playlist: {}", e),
-                }
-            }
-            Err(e) => log::error!("Failed to read legacy playlist: {}", e),
-        }
-    }
-    
     Vec::new()
 }
 
 /// Save playlists to file
-fn save_playlists_to_file(playlists: &[PlaylistCollection]) {
-    let path = get_playlists_path();
+fn save_playlists_to_file(path: &PathBuf, playlists: &[PlaylistCollection]) {
     match serde_json::to_string_pretty(playlists) {
         Ok(content) => {
-            if let Err(e) = fs::write(&path, content) {
-                log::error!("Failed to write playlists file: {}", e);
+            if let Err(e) = fs::write(path, content) {
+                log::error!("Failed to write playlists file {:?}: {}", path, e);
             } else {
                 let total_songs: usize = playlists.iter().map(|c| c.songs.len()).sum();
-                log::info!("Saved {} collections ({} total songs) to playlists file", playlists.len(), total_songs);
+                log::info!("Saved {} collections ({} total songs) to playlists file: {:?}", playlists.len(), total_songs, path);
             }
         }
         Err(e) => log::error!("Failed to serialize playlists: {}", e),
@@ -146,13 +83,85 @@ pub struct PlaylistCollection {
 
 /// Thread-safe playlist store (always available, both Host and Guest modes)
 pub struct PlaylistStore {
+    base_path: Arc<RwLock<Option<PathBuf>>>,
     playlists: Arc<RwLock<Vec<PlaylistCollection>>>,
 }
 
 impl PlaylistStore {
     pub fn new() -> Self {
         Self {
-            playlists: Arc::new(RwLock::new(load_playlists_from_file())),
+            base_path: Arc::new(RwLock::new(None)),
+            playlists: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Initialize the store with a persistent path and load data
+    pub fn initialize(&self, app_data_dir: PathBuf) -> Vec<PlaylistCollection> {
+        let mut path = app_data_dir;
+        let _ = fs::create_dir_all(&path);
+        path.push("playlists.json");
+        
+        // 1. Check if new path exists
+        if !path.exists() {
+            // 2. Try migration from old 'KaraokeNatin' dir if on desktop
+            #[cfg(not(target_os = "android"))]
+            {
+                let old_base = dirs::data_local_dir()
+                    .or_else(|| dirs::data_dir());
+                
+                if let Some(mut old_path) = old_base {
+                    old_path.push("KaraokeNatin");
+                    
+                    // Try migrating playlists.json
+                    let mut old_playlists_json = old_path.clone();
+                    old_playlists_json.push("playlists.json");
+                    
+                    if old_playlists_json.exists() {
+                        log::info!("Migrating existing playlists.json from {:?}", old_playlists_json);
+                        if let Ok(_) = fs::copy(&old_playlists_json, &path) {
+                            // Optionally remove if you want to be clean, but maybe safer to keep for now
+                            // let _ = fs::remove_file(&old_playlists_json);
+                        }
+                    } else {
+                        // Try migrating legacy playlist.json
+                        let mut legacy_json = old_path.clone();
+                        legacy_json.push("playlist.json");
+                        
+                        if legacy_json.exists() {
+                            log::info!("Migrating legacy playlist.json from {:?}", legacy_json);
+                            if let Ok(content) = fs::read_to_string(&legacy_json) {
+                                if let Ok(songs) = serde_json::from_str::<Vec<Song>>(&content) {
+                                    let now = chrono::Utc::now().timestamp_millis();
+                                    let default_collection = PlaylistCollection {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        name: "Default Playlist".to_string(),
+                                        visibility: CollectionVisibility::Public,
+                                        songs,
+                                        created_at: now,
+                                        updated_at: now,
+                                    };
+                                    save_playlists_to_file(&path, &[default_collection]);
+                                    // let _ = fs::remove_file(&legacy_json);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let loaded_playlists = load_playlists_from_file(&path);
+        
+        *self.base_path.write() = Some(path);
+        *self.playlists.write() = loaded_playlists.clone();
+        
+        loaded_playlists
+    }
+
+    fn save(&self) {
+        let pl = self.playlists.read();
+        if let Some(path) = self.base_path.read().as_ref() {
+            save_playlists_to_file(path, &pl);
         }
     }
 
@@ -173,82 +182,112 @@ impl PlaylistStore {
     pub fn create_collection(&self, name: String, visibility: CollectionVisibility) -> String {
         let now = chrono::Utc::now().timestamp_millis();
         let id = uuid::Uuid::new_v4().to_string();
-        let mut pl = self.playlists.write();
-        pl.push(PlaylistCollection {
-            id: id.clone(),
-            name,
-            visibility,
-            songs: Vec::new(),
-            created_at: now,
-            updated_at: now,
-        });
-        save_playlists_to_file(&pl);
+        {
+            let mut pl = self.playlists.write();
+            pl.push(PlaylistCollection {
+                id: id.clone(),
+                name,
+                visibility,
+                songs: Vec::new(),
+                created_at: now,
+                updated_at: now,
+            });
+        }
+        self.save();
         id
     }
 
     /// Delete a playlist collection
     pub fn delete_collection(&self, collection_id: &str) -> bool {
-        let mut pl = self.playlists.write();
-        if let Some(pos) = pl.iter().position(|c| c.id == collection_id) {
-            pl.remove(pos);
-            save_playlists_to_file(&pl);
-            true
-        } else {
-            false
+        let success = {
+            let mut pl = self.playlists.write();
+            if let Some(pos) = pl.iter().position(|c| c.id == collection_id) {
+                pl.remove(pos);
+                true
+            } else {
+                false
+            }
+        };
+        if success {
+            self.save();
         }
+        success
     }
 
     /// Rename a playlist collection
     pub fn rename_collection(&self, collection_id: &str, name: String) -> bool {
-        let mut pl = self.playlists.write();
-        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
-            col.name = name;
-            col.updated_at = chrono::Utc::now().timestamp_millis();
-            save_playlists_to_file(&pl);
-            true
-        } else {
-            false
+        let success = {
+            let mut pl = self.playlists.write();
+            if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+                col.name = name;
+                col.updated_at = chrono::Utc::now().timestamp_millis();
+                true
+            } else {
+                false
+            }
+        };
+        if success {
+            self.save();
         }
+        success
     }
 
     /// Set visibility of a playlist collection
     pub fn set_collection_visibility(&self, collection_id: &str, visibility: CollectionVisibility) -> bool {
-        let mut pl = self.playlists.write();
-        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
-            col.visibility = visibility;
-            col.updated_at = chrono::Utc::now().timestamp_millis();
-            save_playlists_to_file(&pl);
-            true
-        } else {
-            false
+        let success = {
+            let mut pl = self.playlists.write();
+            if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+                col.visibility = visibility;
+                col.updated_at = chrono::Utc::now().timestamp_millis();
+                true
+            } else {
+                false
+            }
+        };
+        if success {
+            self.save();
         }
+        success
     }
 
     /// Add a song to a specific collection
     pub fn add_to_collection(&self, collection_id: &str, song: Song) -> bool {
-        let mut pl = self.playlists.write();
-        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
-            col.songs.push(song);
-            col.updated_at = chrono::Utc::now().timestamp_millis();
-            save_playlists_to_file(&pl);
-            true
-        } else {
-            false
+        let success = {
+            let mut pl = self.playlists.write();
+            if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+                col.songs.push(song);
+                col.updated_at = chrono::Utc::now().timestamp_millis();
+                true
+            } else {
+                false
+            }
+        };
+        if success {
+            self.save();
         }
+        success
     }
 
     /// Remove a song from a specific collection
     pub fn remove_from_collection(&self, collection_id: &str, song_id: &str) -> bool {
-        let mut pl = self.playlists.write();
-        if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
-            if let Some(pos) = col.songs.iter().position(|s| s.id == song_id) {
-                col.songs.remove(pos);
-                col.updated_at = chrono::Utc::now().timestamp_millis();
-                save_playlists_to_file(&pl);
-                return true;
+        let success = {
+            let mut pl = self.playlists.write();
+            if let Some(col) = pl.iter_mut().find(|c| c.id == collection_id) {
+                if let Some(pos) = col.songs.iter().position(|s| s.id == song_id) {
+                    col.songs.remove(pos);
+                    col.updated_at = chrono::Utc::now().timestamp_millis();
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        };
+        if success {
+            self.save();
         }
-        false
+        success
     }
 
     /// Copy a song from a collection, returning a new Song for the queue
@@ -307,16 +346,32 @@ impl PlaylistStore {
             s
         }).collect();
         
-        let mut pl = self.playlists.write();
-        pl.push(PlaylistCollection {
-            id: id.clone(),
-            name: exported.collection.name,
-            visibility: exported.collection.visibility,
-            songs,
-            created_at: now,
-            updated_at: now,
-        });
-        save_playlists_to_file(&pl);
+        {
+            let mut pl = self.playlists.write();
+            
+            // Check for name collision and add suffix if needed
+            let base_name = exported.collection.name.clone();
+            let mut final_name = exported.collection.name;
+            let mut suffix_count = 0;
+            while pl.iter().any(|c| c.name == final_name) {
+                suffix_count += 1;
+                if suffix_count == 1 {
+                    final_name = format!("{} (Imported)", final_name);
+                } else {
+                    final_name = format!("{} (Imported {})", base_name, suffix_count);
+                }
+            }
+
+            pl.push(PlaylistCollection {
+                id: id.clone(),
+                name: final_name,
+                visibility: exported.collection.visibility,
+                songs,
+                created_at: now,
+                updated_at: now,
+            });
+        }
+        self.save();
         Ok(id)
     }
 
