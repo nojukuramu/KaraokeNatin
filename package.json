@@ -2,23 +2,26 @@
     "name": "karaokenatin",
     "version": "0.2.0-beta",
     "private": true,
-    "description": "P2P Karaoke System with Tauri Host and Next.js Web Client",
+    "description": "LAN karaoke system: Tauri host app with an embedded web server and browser-based guest remotes",
     "license": "MIT",
     "scripts": {
-        "dev:signaling": "cd apps/signaling-server && pnpm run dev",
-        "dev:host": "cd apps/host && pnpm run tauri:dev",
-        "dev:web": "cd apps/web-client && pnpm run dev",
-        "build:signaling": "cd apps/signaling-server && pnpm run build",
-        "build:signaling-exe": "cd apps/signaling-server && pnpm run bundle",
-        "build:host": "cd apps/host && pnpm run build && pnpm run tauri build",
-        "build:web": "cd apps/web-client && pnpm run build",
-        "build": "pnpm run build:signaling-exe && pnpm run build:host",
-        "setup": "pnpm install && pnpm run setup:packages",
-        "setup:packages": "cd packages/shared && pnpm install && cd ../../apps/signaling-server && pnpm install && cd ../host && pnpm install && cd ../web-client && pnpm install"
+        "setup": "pnpm install && pnpm run build:shared",
+        "build:shared": "cd packages/shared && pnpm run build",
+        "dev:host": "pnpm run build:shared && cd apps/host && pnpm run tauri:dev",
+        "build:host": "pnpm run build:shared && cd apps/host && pnpm run build && pnpm run tauri build",
+        "build": "pnpm run build:host",
+        "typecheck": "pnpm run build:shared && cd apps/host && npx tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "lint:rust": "cd apps/host/src-tauri && cargo clippy --all-targets -- -D warnings",
+        "fmt:rust": "cd apps/host/src-tauri && cargo fmt",
+        "check": "pnpm run typecheck && pnpm run test"
     },
     "workspaces": [
         "apps/*",
         "packages/*"
     ],
-    "devDependencies": {}
+    "devDependencies": {
+        "vitest": "^2.1.9"
+    }
 }
