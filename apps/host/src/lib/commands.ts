@@ -17,22 +17,21 @@ export async function processCommand(command: ClientCommand): Promise<void> {
     return await invoke('process_command', { command });
 }
 
-export async function fetchSongMetadata(youtubeUrl: string): Promise<{
-    title: string;
-    artist: string;
-    duration: number;
-    thumbnailUrl: string;
-    youtubeId: string;
-}> {
-    return await invoke('fetch_song_metadata', { youtubeUrl });
-}
-
+/**
+ * Mirrors `update_player_state(status, current_time, duration)` in commands.rs.
+ * Tauri maps these camelCase keys onto the snake_case Rust parameters; they are
+ * passed flat, not nested under a `state` object.
+ */
 export async function updatePlayerState(state: {
     status?: string;
     currentTime?: number;
     duration?: number;
 }): Promise<void> {
-    return await invoke('update_player_state', { state });
+    return await invoke('update_player_state', {
+        status: state.status,
+        currentTime: state.currentTime,
+        duration: state.duration,
+    });
 }
 
 export async function exportCollection(collectionId: string): Promise<string> {

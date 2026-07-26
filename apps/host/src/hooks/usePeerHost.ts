@@ -23,17 +23,14 @@ export function usePeerHost() {
 
     // Subscribe to room state updates and broadcast to all connected peers
     useEffect(() => {
-        const unlisten = listen<RoomState>('room_state_updated', (event) => {
-            // Filter out personal playlists before broadcasting to remote clients
-            const publicState = {
-                ...event.payload,
-                playlists: (event.payload.playlists || []).filter(
-                    (c: { visibility: string }) => c.visibility === 'public'
-                ),
-            };
+        // `room_state_public` is emitted by Rust with personal collections
+        // already stripped (see emit_state in commands.rs). Do not switch this
+        // to `room_state_updated` — that carries the host's private playlists
+        // and this handler forwards its payload straight to every guest.
+        const unlisten = listen<RoomState>('room_state_public', (event) => {
             const broadcast: HostBroadcast = {
                 type: 'STATE_UPDATE',
-                state: publicState,
+                state: event.payload,
             };
             connectionsRef.current.forEach((conn) => {
                 if (conn.open) {

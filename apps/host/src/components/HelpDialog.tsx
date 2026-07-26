@@ -28,11 +28,15 @@ const HelpDialog = ({ onClose }: HelpDialogProps) => {
         };
     }, [onClose]);
 
+    // Both commands return a descriptive Err on Android, where there is no file
+    // manager entry point and no process spawning. Surface it instead of
+    // failing silently — the message tells the user what to do instead.
     const handleOpenLogs = async () => {
         try {
             await invoke('open_log_folder');
         } catch (error) {
             console.error('Failed to open logs:', error);
+            alert(String(error));
         }
     };
 
@@ -41,6 +45,7 @@ const HelpDialog = ({ onClose }: HelpDialogProps) => {
             await invoke('report_issue');
         } catch (error) {
             console.error('Failed to report issue:', error);
+            alert(String(error));
         }
     };
 

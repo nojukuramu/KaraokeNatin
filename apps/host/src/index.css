@@ -1793,3 +1793,33 @@ body {
     white-space: nowrap;
   }
 }
+/* Floating help button on the mode-select screen. Sized for touch (44px) and
+   offset for notches / TV overscan. */
+.help-fab {
+    position: fixed;
+    right: calc(1rem + env(safe-area-inset-right, 0px));
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 50%;
+    background: var(--surface, rgba(30, 30, 40, 0.85));
+    color: var(--text, #e8e8f0);
+    cursor: pointer;
+    z-index: 900;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.help-fab:hover,
+.help-fab:focus-visible {
+    background: var(--surface-hover, rgba(60, 60, 80, 0.95));
+    transform: scale(1.06);
+    outline: none;
+}
+
+.help-fab:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent, #6c5ce7);
+}

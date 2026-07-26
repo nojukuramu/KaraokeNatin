@@ -305,11 +305,28 @@ pub async fn process_command(
         }
     }
     
-    // Emit state update event to frontend
-    let new_state = state.clone_state();
-    app.emit("room_state_updated", new_state)
+    emit_state(&app, &state)?;
+
+    Ok(())
+}
+
+/// Broadcast the room state to the frontend.
+///
+/// Emits two events deliberately:
+///   `room_state_updated` — full state, including personal collections, for the
+///                          host's own UI.
+///   `room_state_public`  — personal collections stripped, for rebroadcast to
+///                          guests over the data channel.
+///
+/// Keeping the filtered view on this side means the guest broadcast path never
+/// receives private data in the first place. Filtering in the frontend, as this
+/// previously did, left one `.filter()` standing between a guest and every
+/// personal playlist.
+fn emit_state(app: &AppHandle, state: &tauri::State<RoomStateManager>) -> Result<(), String> {
+    app.emit("room_state_updated", state.clone_state())
         .map_err(|e| e.to_string())?;
-    
+    app.emit("room_state_public", state.clone_public_state())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -332,12 +349,9 @@ pub fn update_player_state(
     });
     
     state.write().update_player(player_status, current_time, duration);
-    
-    // Emit state update
-    let new_state = state.clone_state();
-    app.emit("room_state_updated", new_state)
-        .map_err(|e| e.to_string())?;
-    
+
+    emit_state(&app, &state)?;
+
     Ok(())
 }
 
@@ -563,6 +577,97 @@ pub fn start_host_server() -> Result<u16, String> {
     let port = crate::web_server::get_server_port();
     log::info!("[Tauri] Web server (and signaling) on port {}", port);
     Ok(port)
+}
+
+// ============================================================
+// Diagnostics
+// ============================================================
+
+/// URL used by `report_issue`.
+const ISSUE_TRACKER_URL: &str = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
+
+/// Reveal the directory containing the app's log files in the OS file manager.
+///
+/// Desktop only. Android has no user-visible file manager entry point for the
+/// app-private log directory, so this reports a clear error rather than
+/// pretending to succeed.
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        Err("Opening the log folder is not supported on Android.".to_string())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri::Manager;
+
+        let dir = app
+            .path()
+            .app_log_dir()
+            .map_err(|e| format!("Could not resolve the log directory: {}", e))?;
+
+        // The directory does not exist until the logger first writes to it.
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| format!("Could not create the log directory: {}", e))?;
+        }
+
+        open_path(&dir)
+    }
+}
+
+/// Open the issue tracker in the user's default browser.
+#[tauri::command]
+pub fn report_issue(app: AppHandle) -> Result<(), String> {
+    let _ = &app;
+    open_url(ISSUE_TRACKER_URL)
+}
+
+/// Open a filesystem path with the platform's file manager.
+#[cfg(not(target_os = "android"))]
+fn open_path(path: &std::path::Path) -> Result<(), String> {
+    let path_str = path.to_str().ok_or("Log directory path is not valid UTF-8")?;
+    spawn_opener(path_str)
+}
+
+/// Open a URL with the platform's default handler.
+fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // No process spawning on Android; the webview handles navigation.
+        Err(format!("Open this URL manually: {}", url))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        spawn_opener(url)
+    }
+}
+
+/// Hand a path or URL to the platform opener.
+///
+/// Deliberately not `tauri-plugin-shell`: that plugin is declared in
+/// package.json but present in neither Cargo.toml nor the capability file, so
+/// it does not actually work here. This spawns the OS opener directly and is
+/// compiled out on Android, where process spawning is unavailable.
+#[cfg(not(target_os = "android"))]
+fn spawn_opener(target: &str) -> Result<(), String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "windows")]
+    let result = Command::new("cmd").args(["/C", "start", "", target]).spawn();
+
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(target).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = Command::new("xdg-open").arg(target).spawn();
+
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Could not open '{}': {}", target, e))
 }
 
 /// Response types

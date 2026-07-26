@@ -92,6 +92,9 @@ pub fn run() {
             commands::playlist_import_collection,
             commands::save_collection_to_file,
             commands::load_collection_from_file,
+            // Diagnostics
+            commands::open_log_folder,
+            commands::report_issue,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
