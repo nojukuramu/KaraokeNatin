@@ -5,81 +5,57 @@ Two workflows live in `.github/workflows/`:
 | Workflow | Runs on | Produces |
 |---|---|---|
 | `ci.yml` | every push and PR | nothing — it proves the code is correct |
-| `release.yml` | `v*` tags, or manual dispatch | the installers people download |
+| `build-release.yml` | push/PR to `main`/`master`, or manual dispatch | Windows installers and an Android APK, as run artifacts |
 
-## Cutting a release
+`build-release.yml` is restored from the version that last worked in this repo (`e767525`/`f0659ad^`, February 2026), with one deliberate change: the Android job's two `npx tauri ...` invocations became `pnpm exec tauri ...`. Everything else is untouched. See "Known state" below for why.
 
-```bash
-# Version lives in three places; keep them in step.
-#   package.json, apps/host/package.json, apps/host/src-tauri/tauri.conf.json
-git tag v0.3.0
-git push origin v0.3.0
-```
+## What it does
 
-That builds everything and publishes a GitHub Release with generated notes.
+Two independent jobs, `build-windows` and `build-android`. Each installs dependencies, builds `packages/shared`, builds the host frontend, then builds for its platform:
 
-To build artifacts **without** publishing — checking a change builds on all three platforms, say — use **Actions → Release → Run workflow** and leave `publish_release` unchecked. Artifacts are attached to the run for 90 days.
+| Platform | Steps | Artifact |
+|---|---|---|
+| Windows | `pnpm --filter @karaokenatin/host run tauri:build` | `windows-nsis-installer` (`.exe`), `windows-msi-installer` (`.msi`) |
+| Android | `tauri android init` then `tauri android build` | `android-apk-universal`, `android-apk-all` |
 
-## What comes out
+Both are uploaded as workflow run artifacts (Actions tab → the run → Artifacts), not published anywhere. There is no tagging step, no GitHub Release, no signing. That's not a gap introduced here — the original never had any of that either.
 
-| Platform | Files |
-|---|---|
-| Windows | `KaraokeNatin_<version>_x64-setup.exe` (NSIS), `KaraokeNatin_<version>_x64_en-US.msi` |
-| Linux | `karaokenatin_<version>_amd64.deb`, `karaokenatin_<version>_amd64.AppImage` |
-| Android | `KaraokeNatin-arm64-release.apk` |
+## Known state, from this repo's own CI history
 
-Android builds arm64 only — it covers essentially every device from the last several years, including Android TV boxes. Add ABIs by extending the `cargo ndk -t` flags and the matching Gradle task if you need 32-bit or x86 emulator builds.
+This exact file has one confirmed successful run: [21795050307](https://github.com/nojukuramu/KaraokeNatin/actions/runs/21795050307) (2026-02-08), Windows job green, producing real `.exe`/`.msi` artifacts (now expired — GitHub keeps run artifacts 90 days).
 
-## Android signing
+**The Android job has never succeeded in this repository's Actions history**, including in that same run — it failed in under 90 seconds, before reaching the NDK/Gradle steps. Every other recorded `build-release.yml` run failed on both jobs. Neither `v0.1.3-beta` nor `v0.2.0-beta` was built by this workflow — no workflow file existed in the repo when either was tagged, so those releases were built and uploaded locally.
 
-**Without signing secrets the workflow still succeeds**, but emits an APK named `…-unsigned.apk` and logs a warning. Android refuses to install an unsigned APK, so that build is only useful for CI smoke-checking.
+The Android job's original failure — `npm error could not determine executable to run` — was diagnosed and fixed after this restore. Root cause: the job ran `npx tauri android ...`, and `npx` on this project resolves against the npm registry rather than the locally installed `@tauri-apps/cli`, because this is a pnpm-managed workspace with no npm lockfile for `npx`'s local-bin check to key off. Reproducible directly: `npx tauri --version` fails with that exact error, `pnpm exec tauri --version` succeeds instantly. The Windows job never hit this because it invokes Tauri through `pnpm --filter ... run tauri:build` — pnpm's own script runner, not `npx` — which is very likely why Windows is this workflow's only recorded success and Android never has been, even six months ago. Fixed by swapping both `npx tauri android ...` calls to `pnpm exec tauri android ...`; nothing else about the job changed.
 
-To produce installable APKs, add three repository secrets under **Settings → Secrets and variables → Actions**:
+## Running it
 
-| Secret | Value |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | your keystore, base64-encoded |
-| `ANDROID_KEYSTORE_PASSWORD` | the keystore password |
-| `ANDROID_KEY_ALIAS` | the key alias inside the keystore |
-
-Create a keystore if you don't have one:
-
-```bash
-keytool -genkey -v -keystore karaokenatin.keystore \
-  -alias karaokenatin -keyalg RSA -keysize 2048 -validity 10000
-```
-
-Encode it for the secret:
-
-```bash
-base64 -w0 karaokenatin.keystore   # Linux
-base64 -i karaokenatin.keystore    # macOS
-```
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("karaokenatin.keystore"))  # Windows
-```
-
-**Keep the keystore file.** Android identifies an app by its signing key: lose it and you cannot ship an update to anyone who installed the old build — they have to uninstall first, losing their playlists. Back it up somewhere that is not this repository. `*.keystore` and `*.jks` are gitignored, and the workflow deletes its decoded copy from the runner after signing.
+Push to `main`/`master`, open a PR against them, or use **Actions → Build Release → Run workflow** for a manual run. Artifacts appear on the run's summary page once each job finishes.
 
 ## Local builds
 
-The workflows mirror the local scripts, so you can reproduce a failure without pushing:
+To reproduce a step locally rather than iterating on GitHub:
 
 ```bash
-pnpm run build        # desktop, current platform
-./build.sh android    # unsigned APK
-./build.sh android_signed
+pnpm install --frozen-lockfile
+pnpm --filter @karaokenatin/shared run build
+pnpm --filter @karaokenatin/host run build
+pnpm --filter @karaokenatin/host run tauri:build   # Windows/desktop
 ```
 
-`build.bat` is the Windows equivalent. Both pick the highest installed Android build-tools rather than pinning a version — the workflow does the same, so an SDK update on the runner does not break the build.
+```bash
+cd apps/host
+pnpm exec tauri android init --skip-targets-install
+pnpm exec tauri android build
+```
 
-## If a release build fails
+The repo's own `build.sh` / `build.bat` are a separate, more built-out path (cargo-ndk, keystore signing, highest-installed build-tools detection) — see those scripts directly if you need a signed APK. `build-release.yml` does not use them; it drives everything through the Tauri CLI instead.
 
-| Symptom | Cause |
+## If a build fails
+
+| Symptom | Likely cause |
 |---|---|
-| `gdk-3.0` not found (Linux) | The system-deps step failed or was skipped |
-| `Cannot find module '@karaokenatin/shared'` | `build:shared` did not run before the frontend build |
-| Gradle cannot find `libapp_lib.so` | `cargo ndk` failed earlier — check that step, not Gradle |
-| `apksigner` not found | build-tools not installed by `setup-android` |
-| APK installs but shows a blank screen | Stale assets — the workflow clears `assets/` before copying, but a local build may not |
+| `gdk-3.0` / `webkit2gtk` not found | Not applicable to this workflow — it doesn't build Linux |
+| `Cannot find module '@karaokenatin/shared'` | The shared-package build step failed or didn't run before the frontend build |
+| Android job fails fast (under ~2 minutes) | Matches this workflow's entire history in this repo — see above. Check the job log for the actual first error rather than assuming NDK/Gradle |
+| APK/installer missing from artifacts | `if-no-files-found: warn` on some upload steps means a missing file doesn't fail the job — check the "Find APK files" / "Verify build artifacts" step output |
