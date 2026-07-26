@@ -197,13 +197,15 @@ const ControlPanel = ({
     const shownVolume = pendingVolume ?? volume;
     const shownTime = pendingSeek ?? currentTime;
 
-    const toggleTheme = () => {
-        const newTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(newTheme);
-        document.documentElement.classList.toggle('light', newTheme === 'light');
-    };
+    const toggleTheme = useCallback(() => {
+        setTheme(prev => {
+            const newTheme = prev === 'dark' ? 'light' : 'dark';
+            document.documentElement.classList.toggle('light', newTheme === 'light');
+            return newTheme;
+        });
+    }, []);
 
-    const handlePlayPause = async () => {
+    const handlePlayPause = useCallback(async () => {
         try {
             await invoke('process_command', {
                 command: { type: isPlaying ? 'PAUSE' : 'PLAY' },
@@ -211,9 +213,9 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Play/Pause failed:', error);
         }
-    };
+    }, [isPlaying]);
 
-    const handleSkip = async () => {
+    const handleSkip = useCallback(async () => {
         try {
             await invoke('process_command', {
                 command: { type: 'SKIP' },
@@ -221,11 +223,11 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Skip failed:', error);
         }
-    };
+    }, []);
 
     // SET_VOLUME / TOGGLE_MUTE / SEEK have existed end to end in the protocol
     // and the Rust command enum since the start, with no UI to reach them.
-    const handleVolumeChange = async (next: number) => {
+    const handleVolumeChange = useCallback(async (next: number) => {
         const clamped = Math.max(0, Math.min(100, Math.round(next)));
         setPendingVolume(clamped);
         try {
@@ -235,17 +237,17 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Volume change failed:', error);
         }
-    };
+    }, []);
 
-    const handleToggleMute = async () => {
+    const handleToggleMute = useCallback(async () => {
         try {
             await invoke('process_command', { command: { type: 'TOGGLE_MUTE' } });
         } catch (error) {
             console.error('[ControlPanel] Mute toggle failed:', error);
         }
-    };
+    }, []);
 
-    const handleSeek = async (seconds: number) => {
+    const handleSeek = useCallback(async (seconds: number) => {
         setPendingSeek(null);
         try {
             await invoke('process_command', {
@@ -254,36 +256,57 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Seek failed:', error);
         }
-    };
+    }, []);
 
-    const handleAddToQueue = async (url: string) => {
-        setAddingToQueue(prev => new Set(prev).add(url));
+    const handleAddToQueue = useCallback(async (url: string) => {
+        dispatchAddStatus({ type: 'START', target: 'queue', url });
+        let success = false;
         try {
             await invoke('process_command', {
                 command: { type: 'ADD_SONG', youtubeUrl: url, addedBy: 'Host' },
             });
-            setAddedToQueue(prev => new Set(prev).add(url));
+            success = true;
         } catch (error) {
             console.error('[ControlPanel] Add to queue failed:', error);
         } finally {
-            setAddingToQueue(prev => { const s = new Set(prev); s.delete(url); return s; });
+            dispatchAddStatus({ type: 'SETTLE', target: 'queue', url, success });
         }
-    };
+    }, []);
 
-    const handlePickCollection = async (url: string, collectionId: string) => {
+    const handlePickCollection = useCallback(async (url: string, collectionId: string) => {
         setPickerOpenFor(null);
-        setAddingToPlaylist(prev => new Set(prev).add(url));
+        dispatchAddStatus({ type: 'START', target: 'playlist', url });
+        let success = false;
         try {
             await onAddToPlaylist(url, collectionId);
-            setAddedToPlaylist(prev => new Set(prev).add(url));
+            success = true;
         } catch (error) {
             console.error('[ControlPanel] Add to playlist failed:', error);
         } finally {
-            setAddingToPlaylist(prev => { const s = new Set(prev); s.delete(url); return s; });
+            dispatchAddStatus({ type: 'SETTLE', target: 'playlist', url, success });
         }
-    };
+    }, [onAddToPlaylist]);
 
-    const handleCreateCollection = async (thenAddUrl?: string) => {
+    const handlePickLibraryCollection = useCallback(async (url: string, collectionId: string) => {
+        setLibraryPickerOpenFor(null);
+        dispatchAddStatus({ type: 'START', target: 'library', url });
+        let success = false;
+        try {
+            await playlistAddSong(url, collectionId, 'Host');
+            success = true;
+            await loadLocalPlaylists();
+        } catch (error) {
+            console.error('[ControlPanel] Add to library failed:', error);
+        } finally {
+            dispatchAddStatus({ type: 'SETTLE', target: 'library', url, success });
+        }
+    }, [loadLocalPlaylists]);
+
+    // Used both by the main "Playlists" section's own "New Collection"
+    // button (no thenAddUrl) and, historically, by a picker creation flow;
+    // handleCreateLibraryCollection below is the one the search-result
+    // pickers actually use now.
+    const handleCreateCollection = useCallback(async (thenAddUrl?: string) => {
         if (!newCollectionName.trim()) return;
         try {
             const newId = await playlistCreateCollection(newCollectionName.trim(), 'personal');
@@ -292,39 +315,15 @@ const ControlPanel = ({
             await loadLocalPlaylists();
 
             if (thenAddUrl) {
-                // If adding to playlist directly from search result via this creation flow
-                // We'd need to know the ID. playlistCreateCollection returns ID.
-                // But the picker logic for search result uses handleCreateCollection(result.url).
-                // Wait, handleCreateCollection was used in the picker OLD logic.
-                // My new picker uses handleCreateLibraryCollection.
-                // So handleCreateCollection is used for the MAIN playlist tab "New Collection" button.
-                // That button likely doesn't pass a URL.
-                // If it does (e.g. from existing logic), we handle it.
-                if (thenAddUrl) {
-                    await playlistAddSong(thenAddUrl, newId, 'Host');
-                    await loadLocalPlaylists();
-                }
+                await playlistAddSong(thenAddUrl, newId, 'Host');
+                await loadLocalPlaylists();
             }
         } catch (error) {
             console.error('[ControlPanel] Create collection failed:', error);
         }
-    };
+    }, [newCollectionName, loadLocalPlaylists]);
 
-    const handlePickLibraryCollection = async (url: string, collectionId: string) => {
-        setLibraryPickerOpenFor(null);
-        setAddingToLibrary(prev => new Set(prev).add(url));
-        try {
-            await playlistAddSong(url, collectionId, 'Host');
-            setAddedToLibrary(prev => new Set(prev).add(url));
-            await loadLocalPlaylists();
-        } catch (error) {
-            console.error('[ControlPanel] Add to library failed:', error);
-        } finally {
-            setAddingToLibrary(prev => { const s = new Set(prev); s.delete(url); return s; });
-        }
-    };
-
-    const handleCreateLibraryCollection = async (thenAddUrl?: string) => {
+    const handleCreateLibraryCollection = useCallback(async (thenAddUrl?: string) => {
         if (!newLibraryCollectionName.trim()) return;
         try {
             const newId = await playlistCreateCollection(newLibraryCollectionName.trim(), 'personal');
@@ -340,9 +339,9 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Create library collection failed:', error);
         }
-    };
+    }, [newLibraryCollectionName, loadLocalPlaylists, handlePickLibraryCollection]);
 
-    const handlePlaylistToQueue = async (collectionId: string, songId: string) => {
+    const handlePlaylistToQueue = useCallback(async (collectionId: string, songId: string) => {
         try {
             await invoke('process_command', {
                 command: { type: 'PLAYLIST_TO_QUEUE', songId, collectionId },
@@ -350,16 +349,16 @@ const ControlPanel = ({
         } catch (error) {
             console.error('[ControlPanel] Playlist to queue failed:', error);
         }
-    };
+    }, []);
 
-    const handleRemoveFromPlaylist = async (collectionId: string, songId: string) => {
+    const handleRemoveFromPlaylist = useCallback(async (collectionId: string, songId: string) => {
         try {
             await playlistRemoveSong(collectionId, songId);
             await loadLocalPlaylists();
         } catch (error) {
             console.error('[ControlPanel] Remove from playlist failed:', error);
         }
-    };
+    }, [loadLocalPlaylists]);
 
     const handleDeleteCollection = async (collectionId: string) => {
         if (!confirm('Are you sure you want to delete this collection?')) return;
@@ -629,6 +628,8 @@ const ControlPanel = ({
                                                 alt=""
                                                 loading="lazy"
                                                 decoding="async"
+                                                width={72}
+                                                height={54}
                                                 className="search-result-thumb"
                                             />
                                             <div className="search-result-info">
@@ -917,6 +918,8 @@ const ControlPanel = ({
                                             alt=""
                                             loading="lazy"
                                             decoding="async"
+                                            width={40}
+                                            height={30}
                                             className="playlist-thumb"
                                         />
                                         <div className="playlist-info">

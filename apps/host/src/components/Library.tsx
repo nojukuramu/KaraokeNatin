@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { List, type RowComponentProps } from 'react-window';
 import { ArrowLeft, Sun, Moon, Search, Plus, Music, Trash2, Pencil, Globe, Lock, Upload, ChevronDown } from 'lucide-react';
-import { PlaylistCollection } from '../hooks/useRoomState';
+import { PlaylistCollection, Song } from '../hooks/useRoomState';
 import {
     getPlaylists,
     playlistCreateCollection,
@@ -25,6 +26,41 @@ interface SearchResult {
 
 interface LibraryProps {
     onBack: () => void;
+}
+
+// Library collections are unbounded (a user can accumulate hundreds of
+// songs), so the song list is virtualized with react-window: only rows
+// scrolled into view exist in the DOM. This page has no D-pad wiring
+// (no useFocusable calls anywhere in this file) — it's the mouse/touch
+// management screen, not a TV surface — so windowing carries none of the
+// spatial-navigation focus risk that keeps ControlPanel.tsx and Queue.tsx
+// unvirtualized. See REPOMAPPING.md / task.md T28 for that distinction.
+const PLAYLIST_ROW_HEIGHT = 46; // matches .playlist-item (padding + 30px thumb) + margin-bottom
+const PLAYLIST_LIST_HEIGHT = 280; // matches the old .playlist-list max-height
+
+interface PlaylistRowData {
+    songs: Song[];
+    onRemove: (songId: string) => void;
+}
+
+function PlaylistSongRow({ index, style, songs, onRemove }: RowComponentProps<PlaylistRowData>) {
+    const song = songs[index];
+    return (
+        <div style={style} className="playlist-item">
+            <span className="playlist-number">{index + 1}</span>
+            <img src={song.thumbnailUrl} alt="" loading="lazy" decoding="async" width={40} height={30} className="playlist-thumb" />
+            <div className="playlist-info">
+                <div className="playlist-title">{song.title}</div>
+            </div>
+            <button
+                className="playlist-remove-btn"
+                onClick={() => onRemove(song.id)}
+                title="Remove from library"
+            >
+                <Trash2 size={14} />
+            </button>
+        </div>
+    );
 }
 
 /**
@@ -188,6 +224,14 @@ export default function Library({ onBack }: LibraryProps) {
         }
     };
 
+    // Stable per-collection callback so react-window's rowProps identity
+    // only changes when the active collection actually changes.
+    const handleRemoveFromActiveCollection = useCallback((songId: string) => {
+        if (activeCollectionId) {
+            handleRemoveFromLibrary(activeCollectionId, songId);
+        }
+    }, [activeCollectionId]);
+
 
 
     const handleSaveToFile = async (collectionId: string) => {
@@ -270,7 +314,7 @@ export default function Library({ onBack }: LibraryProps) {
 
                                 return (
                                     <div key={result.url} className="search-result-item">
-                                        <img src={result.thumbnail} alt="" loading="lazy" decoding="async" className="search-result-thumb" />
+                                        <img src={result.thumbnail} alt="" loading="lazy" decoding="async" width={72} height={54} className="search-result-thumb" />
                                         <div className="search-result-info">
                                             <div className="search-result-title">{result.title}</div>
                                             <div className="search-result-meta">
@@ -500,24 +544,15 @@ export default function Library({ onBack }: LibraryProps) {
                             <p className="playlist-empty-hint">{collections.length === 0 ? 'Create your first collection above' : 'Add songs from search results'}</p>
                         </div>
                     ) : (
-                        <div className="playlist-list">
-                            {activeCollection.songs.map((song, i) => (
-                                <div key={song.id} className="playlist-item">
-                                    <span className="playlist-number">{i + 1}</span>
-                                    <img src={song.thumbnailUrl} alt="" loading="lazy" decoding="async" className="playlist-thumb" />
-                                    <div className="playlist-info">
-                                        <div className="playlist-title">{song.title}</div>
-                                    </div>
-                                    <button
-                                        className="playlist-remove-btn"
-                                        onClick={() => handleRemoveFromLibrary(activeCollection.id, song.id)}
-                                        title="Remove from library"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+                        <List
+                            className="playlist-list"
+                            style={{ height: PLAYLIST_LIST_HEIGHT }}
+                            rowComponent={PlaylistSongRow}
+                            rowCount={activeCollection.songs.length}
+                            rowHeight={PLAYLIST_ROW_HEIGHT}
+                            rowProps={{ songs: activeCollection.songs, onRemove: handleRemoveFromActiveCollection }}
+                            rowKey={(index, data) => data.songs[index].id}
+                        />
                     )}
                 </div>
             </div>

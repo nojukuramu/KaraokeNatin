@@ -131,6 +131,10 @@ const Queue = ({ songs }: QueueProps) => {
                             <img
                                 src={song.thumbnailUrl}
                                 alt={song.title}
+                                loading="lazy"
+                                decoding="async"
+                                width={44}
+                                height={33}
                                 className="queue-thumb-compact"
                             />
 
