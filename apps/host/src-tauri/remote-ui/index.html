@@ -2268,6 +2268,23 @@
                 dataConn.on('data', (data) => {
                     if (isStale()) return;
                     console.log('[Remote] Received:', data);
+
+                    // STATE_PATCH carries only the fields that changed. The host
+                    // sends it for player progress ticks, which are frequent and
+                    // would otherwise resend the whole room every few seconds.
+                    // Merge shallowly: each patched key is a self-contained
+                    // subtree, so replacing it wholesale is correct.
+                    if (data.type === 'STATE_PATCH') {
+                        if (!state.roomState) {
+                            // No baseline yet — a patch is meaningless until the
+                            // first full STATE_UPDATE arrives on connect.
+                            return;
+                        }
+                        state.roomState = { ...state.roomState, ...(data.patch || {}) };
+                        render();
+                        return;
+                    }
+
                     if (data.type === 'STATE_UPDATE') {
                         // Check for successful actions by comparing old and new state
                         const oldState = state.roomState;

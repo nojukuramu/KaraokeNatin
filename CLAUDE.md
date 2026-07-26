@@ -25,8 +25,24 @@
 | `docs/RELEASING.md` | How releases are built and signed |
 | `REPO_NOTES.md` | Audit reasoning, assumptions, open questions |
 
-The READMEs, `QUICK_START.md`, `DEPLOYMENT.md`, and `RUN_INSTRUCTIONS.md` describe an architecture the project has moved off. Treat their claims as hypotheses to check against code.
+`README.md` and `apps/host/RUN_INSTRUCTIONS.md` still contain stale claims; `QUICK_START.md` and `DEPLOYMENT.md` have been rewritten against the current architecture. Treat any doc claim as a hypothesis to check against code.
+
+## Verifying
+
+```bash
+pnpm run check      # typecheck + frontend tests + Rust tests
+pnpm run test       # vitest only
+pnpm run test:rust  # cargo test only
+pnpm run lint:rust  # clippy
+```
+
+CI (`.github/workflows/ci.yml`) runs the same gates on every push. Releases are built by `.github/workflows/release.yml` — see `docs/RELEASING.md`.
+
+The tests worth knowing about, because they guard traps the compilers do not:
+- `tauri-commands.test.ts` — parses every `invoke` against the Rust signatures. Catches missing commands and wrong argument names.
+- `rust-parity.test.ts` — asserts the protocol agrees across `packages/shared`, `commands.rs` and `remote-ui/index.html`.
+- `tests/peer_broker.rs` — connects two real WebSocket clients through the embedded broker.
 
 ## Before finishing
 
-State what you actually verified. There is no test suite, no linter, and no CI, so nothing else will catch a regression.
+State what you actually verified, and run `pnpm run check`. Note that no test covers the UI end to end, so anything user-facing still needs a look at the running app.

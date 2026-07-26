@@ -687,6 +687,11 @@ impl RoomStateManager {
     }
 
     /// Clone the current state (full, including personal collections — for host UI)
+    /// Clone only the player slice, for high-frequency progress broadcasts.
+    pub fn clone_player(&self) -> PlayerState {
+        self.state.read().player.clone()
+    }
+
     pub fn clone_state(&self) -> RoomState {
         self.state.read().clone()
     }

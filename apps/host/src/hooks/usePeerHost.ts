@@ -51,20 +51,29 @@ export function usePeerHost() {
         // already stripped (see emit_state in commands.rs). Do not switch this
         // to `room_state_updated` — that carries the host's private playlists
         // and this handler forwards its payload straight to every guest.
-        const unlisten = listen<RoomState>('room_state_public', (event) => {
-            const broadcast: HostBroadcast = {
-                type: 'STATE_UPDATE',
-                state: event.payload,
-            };
+        const broadcast = (message: HostBroadcast) => {
             connectionsRef.current.forEach((conn) => {
                 if (conn.open) {
-                    conn.send(broadcast);
+                    conn.send(message);
                 }
             });
+        };
+
+        const unlistenFull = listen<RoomState>('room_state_public', (event) => {
+            broadcast({ type: 'STATE_UPDATE', state: event.payload });
+        });
+
+        // Player progress ticks arrive several times a minute and previously
+        // resent the entire room — queue plus every public collection — to
+        // every guest just to move a timestamp. `player` is a self-contained
+        // subtree, so patching it cannot desync the rest.
+        const unlistenPlayer = listen<RoomState['player']>('room_player_patch', (event) => {
+            broadcast({ type: 'STATE_PATCH', patch: { player: event.payload } });
         });
 
         return () => {
-            unlisten.then(fn => fn());
+            unlistenFull.then(fn => fn());
+            unlistenPlayer.then(fn => fn());
         };
     }, []);
 

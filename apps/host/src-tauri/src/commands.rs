@@ -330,6 +330,32 @@ fn emit_state(app: &AppHandle, state: &tauri::State<RoomStateManager>) -> Result
     Ok(())
 }
 
+/// Broadcast only the player slice of the state.
+///
+/// The host player reports progress roughly every five seconds, and each report
+/// previously cloned and serialised the *entire* RoomState — queue plus every
+/// public collection — to every connected guest. With a large library that is
+/// tens of kilobytes per tick, per guest, over WebRTC, on phones, to convey a
+/// timestamp that moved.
+///
+/// `player` is a self-contained subtree, so patching it cannot desync anything
+/// else. Structural changes (queue, collections) deliberately keep emitting the
+/// full state: they are rare, and a patch protocol for them would need sequence
+/// numbers and a resync path to be safe. See OPTIMIZATION.md #1.
+fn emit_player_patch(
+    app: &AppHandle,
+    state: &tauri::State<RoomStateManager>,
+) -> Result<(), String> {
+    let player = state.clone_player();
+    // The host UI still wants the full object; it is in-process, so the cost is
+    // a clone rather than a serialise-and-transmit.
+    app.emit("room_state_updated", state.clone_state())
+        .map_err(|e| e.to_string())?;
+    app.emit("room_player_patch", player)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Update player state (called from frontend YouTube player)
 #[tauri::command]
 pub fn update_player_state(
@@ -350,7 +376,9 @@ pub fn update_player_state(
     
     state.write().update_player(player_status, current_time, duration);
 
-    emit_state(&app, &state)?;
+    // Player ticks are by far the highest-frequency broadcast; patch instead of
+    // resending the whole room.
+    emit_player_patch(&app, &state)?;
 
     Ok(())
 }
