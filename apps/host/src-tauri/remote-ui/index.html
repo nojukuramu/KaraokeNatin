@@ -5,8 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>KaraokeNatin Remote</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <!-- Fonts: no internet dependency. 'Inter' is used when installed locally;
+         otherwise this degrades to the platform's native UI font stack. -->
+    <script src="/vendor/lucide-1.27.0.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -75,7 +76,7 @@
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
@@ -1150,9 +1151,9 @@
         </div>
     </div>
 
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="/vendor/socket.io-4.8.3.min.js"></script>
+    <script src="/vendor/peerjs-1.5.5.min.js"></script>
+    <script src="/vendor/qrcodejs-1.0.0.min.js"></script>
     <script>
         // State
         let state = {
@@ -1172,9 +1173,11 @@
             reconnectAttempts: 0,
             maxReconnectAttempts: 5,
             reconnecting: false,
-            reconnecting: false,
             // InApp Remote mode (embedded in Tauri host app)
             isInAppRemote: new URLSearchParams(window.location.search).get('mode') === 'inapp',
+            // Join token from the QR URL (?t=...). The signaling server verifies
+            // this on every JOIN_ROOM, so a guest arriving without it is rejected.
+            joinToken: new URLSearchParams(window.location.search).get('t') || '',
             // Local Library (from Native App)
             localPlaylists: [],
             activeLocalCollectionIdx: 0,
@@ -2146,7 +2149,7 @@
                 console.log('[Remote] Socket connected');
                 socket.emit('JOIN_ROOM', {
                     roomId: 'default',
-                    joinToken: '',
+                    joinToken: state.joinToken,
                     displayName: state.username
                 });
             });
@@ -2226,7 +2229,17 @@
 
             console.log('[Remote] Connecting to host peer:', hostPeerId);
 
+            // Use the PeerJS broker embedded in the host we were served from.
+            // Without host/port/path, PeerJS silently falls back to its public
+            // 0.peerjs.com cloud — which meant this LAN app could not connect a
+            // guest at all without internet access. Same-origin by construction:
+            // this page is served by that very host.
             peer = new Peer({
+                host: window.location.hostname,
+                port: Number(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80),
+                path: '/',
+                key: 'peerjs',
+                secure: window.location.protocol === 'https:',
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
@@ -2255,6 +2268,23 @@
                 dataConn.on('data', (data) => {
                     if (isStale()) return;
                     console.log('[Remote] Received:', data);
+
+                    // STATE_PATCH carries only the fields that changed. The host
+                    // sends it for player progress ticks, which are frequent and
+                    // would otherwise resend the whole room every few seconds.
+                    // Merge shallowly: each patched key is a self-contained
+                    // subtree, so replacing it wholesale is correct.
+                    if (data.type === 'STATE_PATCH') {
+                        if (!state.roomState) {
+                            // No baseline yet — a patch is meaningless until the
+                            // first full STATE_UPDATE arrives on connect.
+                            return;
+                        }
+                        state.roomState = { ...state.roomState, ...(data.patch || {}) };
+                        render();
+                        return;
+                    }
+
                     if (data.type === 'STATE_UPDATE') {
                         // Check for successful actions by comparing old and new state
                         const oldState = state.roomState;

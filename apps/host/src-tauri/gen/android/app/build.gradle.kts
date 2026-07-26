@@ -17,6 +17,9 @@ android {
     compileSdk = 36
     namespace = "com.karaokenatin.app"
     defaultConfig {
+        // Required: guests reach the host over plain HTTP at a runtime-
+        // discovered LAN IP. See res/xml/network_security_config.xml for why
+        // this cannot currently be scoped tighter than "permitted".
         manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.karaokenatin.app"
         minSdk = 24
@@ -26,6 +29,7 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // Same reasoning as defaultConfig above.
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

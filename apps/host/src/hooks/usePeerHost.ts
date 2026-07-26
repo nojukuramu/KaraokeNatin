@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { io, Socket } from 'socket.io-client';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { HostBroadcast, isClientCommand, RoomState } from '@karaokenatin/shared';
 import { processCommand, getRoomState } from '../lib/commands';
-import { hashToken } from '../lib/security';
+import { hashToken, generateRoomId, generateJoinToken } from '../lib/security';
 
 /**
  * Hook to manage PeerJS host and WebRTC connections
@@ -14,42 +15,90 @@ export function usePeerHost() {
     const [connections, setConnections] = useState<Map<string, DataConnection>>(new Map());
     const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
     const [connectionUrl, setConnectionUrl] = useState<string>('');
-    const [socket, setSocket] = useState<Socket | null>(null);
+    // Held in state so the socket survives re-renders; the cleanup path uses the
+    // local `socketInstance` binding instead, so this value is write-only.
+    const [, setSocket] = useState<Socket | null>(null);
 
     // Keep ref in sync with state
     useEffect(() => {
         connectionsRef.current = connections;
     }, [connections]);
 
+    // Sweep for channels that went away without firing 'close'. PeerJS does not
+    // reliably emit close when the underlying transport dies (a slept phone, a
+    // dropped access point), so `conn.open` is the only honest signal.
+    useEffect(() => {
+        const REAP_INTERVAL_MS = 15000;
+        const timer = setInterval(() => {
+            const stale: string[] = [];
+            connectionsRef.current.forEach((conn, peerId) => {
+                if (!conn.open) stale.push(peerId);
+            });
+            if (stale.length === 0) return;
+            console.log('[PeerHost] Reaping stale connections:', stale);
+            setConnections((prev) => {
+                const next = new Map(prev);
+                stale.forEach((id) => next.delete(id));
+                return next;
+            });
+        }, REAP_INTERVAL_MS);
+
+        return () => clearInterval(timer);
+    }, []);
+
     // Subscribe to room state updates and broadcast to all connected peers
     useEffect(() => {
-        const unlisten = listen<RoomState>('room_state_updated', (event) => {
-            // Filter out personal playlists before broadcasting to remote clients
-            const publicState = {
-                ...event.payload,
-                playlists: (event.payload.playlists || []).filter(
-                    (c: { visibility: string }) => c.visibility === 'public'
-                ),
-            };
-            const broadcast: HostBroadcast = {
-                type: 'STATE_UPDATE',
-                state: publicState,
-            };
+        // `room_state_public` is emitted by Rust with personal collections
+        // already stripped (see emit_state in commands.rs). Do not switch this
+        // to `room_state_updated` — that carries the host's private playlists
+        // and this handler forwards its payload straight to every guest.
+        const broadcast = (message: HostBroadcast) => {
             connectionsRef.current.forEach((conn) => {
                 if (conn.open) {
-                    conn.send(broadcast);
+                    conn.send(message);
                 }
             });
+        };
+
+        const unlistenFull = listen<RoomState>('room_state_public', (event) => {
+            broadcast({ type: 'STATE_UPDATE', state: event.payload });
+        });
+
+        // Player progress ticks arrive several times a minute and previously
+        // resent the entire room — queue plus every public collection — to
+        // every guest just to move a timestamp. `player` is a self-contained
+        // subtree, so patching it cannot desync the rest.
+        const unlistenPlayer = listen<RoomState['player']>('room_player_patch', (event) => {
+            broadcast({ type: 'STATE_PATCH', patch: { player: event.payload } });
         });
 
         return () => {
-            unlisten.then(fn => fn());
+            unlistenFull.then(fn => fn());
+            unlistenPlayer.then(fn => fn());
         };
     }, []);
 
     useEffect(() => {
-        // Initialize PeerJS
-        const peerInstance = new Peer({
+        let cancelled = false;
+        let peerInstance: Peer | null = null;
+        let socketInstance: Socket | null = null;
+
+        const setup = async () => {
+        // The broker lives in our own Rust web server, so we need its port
+        // before constructing the Peer.
+        const port = await invoke<number>('get_server_port');
+        if (cancelled) return;
+
+        // Point PeerJS at that broker. Omitting host/port/path makes PeerJS
+        // fall back to its public 0.peerjs.com cloud, which put the WebRTC
+        // handshake on the internet and made this LAN app unusable offline.
+        // `path: '/'` is correct: PeerJS appends 'peerjs', giving '/peerjs'.
+        peerInstance = new Peer({
+            host: 'localhost',
+            port,
+            path: '/',
+            key: 'peerjs',
+            secure: false,
             config: {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
@@ -66,10 +115,8 @@ export function usePeerHost() {
             const joinToken = generateJoinToken();
             const joinTokenHash = await hashToken(joinToken);
 
-            // Connect to signaling server
-            const { invoke } = await import('@tauri-apps/api/core');
-            const port = await invoke<number>('get_server_port');
-            const socketInstance = io(`http://localhost:${port}`);
+            // Connect to signaling server (same embedded server, same port)
+            socketInstance = io(`http://localhost:${port}`);
 
             // Include peerId when creating room so clients can connect
             socketInstance.emit('CREATE_ROOM', { roomId, joinTokenHash, hostPeerId: peerId });
@@ -79,15 +126,15 @@ export function usePeerHost() {
                 // Get the base URL (http://ip:port) from the backend
                 try {
                     const baseUrl = await invoke<string>('get_qr_url');
-                    // For remote-ui, we just point to the root. It auto-discovers the room.
-                    setConnectionUrl(baseUrl);
-
-                    // Log a URL for the Next.js web client (dev use)
-                    const webClientUrl = `http://localhost:3000/room/${roomId}?t=${joinToken}&s=${encodeURIComponent(`http://localhost:${port}`)}`;
-                    console.log('[PeerHost] Web client URL (dev):', webClientUrl);
+                    // The token rides in the QR URL. remote-ui reads ?t= and
+                    // sends it as joinToken, which the signaling server now
+                    // verifies for every join (see signaling.rs JOIN_ROOM).
+                    // Without this the token would be unusable and the server
+                    // would have to accept anonymous joins.
+                    setConnectionUrl(`${baseUrl}/?t=${encodeURIComponent(joinToken)}`);
                 } catch (e) {
                     console.error('Failed to get QR URL:', e);
-                    setConnectionUrl(`${window.location.origin}/join?r=${roomId}&t=${joinToken}`);
+                    setConnectionUrl(`${window.location.origin}/?t=${encodeURIComponent(joinToken)}`);
                 }
             });
 
@@ -99,11 +146,21 @@ export function usePeerHost() {
             setupDataChannelHandlers(conn);
         });
 
+        peerInstance.on('error', (err) => {
+            console.error('[PeerHost] Peer error:', err);
+        });
+
         setPeer(peerInstance);
+        };
+
+        setup().catch((e) => console.error('[PeerHost] Setup failed:', e));
 
         return () => {
-            peerInstance.destroy();
-            socket?.disconnect();
+            // Guards against the effect's async setup finishing after unmount,
+            // which would otherwise leave an orphaned Peer and socket alive.
+            cancelled = true;
+            peerInstance?.destroy();
+            socketInstance?.disconnect();
         };
     }, []);
 
@@ -125,8 +182,7 @@ export function usePeerHost() {
             if (msg && msg.type === 'SEARCH' && typeof msg.query === 'string') {
                 console.log('[PeerHost] Processing SEARCH:', msg.query);
                 try {
-                    const { invoke } = await import('@tauri-apps/api/core');
-                    const results = await invoke('search_youtube', {
+                                const results = await invoke('search_youtube', {
                         query: msg.query,
                         limit: msg.limit || 5
                     });
@@ -138,6 +194,20 @@ export function usePeerHost() {
                         code: 'SEARCH_FAILED',
                         message: error instanceof Error ? error.message : 'Search failed'
                     });
+                }
+                return;
+            }
+
+            // PING/PONG existed in the protocol but nothing ever answered a
+            // PING, so guests had no way to tell a live channel from a dead
+            // one. Answer before the generic command path, since PING is a
+            // liveness probe rather than a state mutation.
+            if (msg && msg.type === 'PING') {
+                const pong: HostBroadcast = { type: 'PONG', serverTime: Date.now() };
+                try {
+                    conn.send(pong);
+                } catch (e) {
+                    console.warn('[PeerHost] Failed to answer PING:', e);
                 }
                 return;
             }
@@ -162,11 +232,25 @@ export function usePeerHost() {
 
         conn.on('close', () => {
             console.log('[PeerHost] Connection closed:', conn.peer);
-            setConnections((prev) => {
-                const next = new Map(prev);
-                next.delete(conn.peer);
-                return next;
-            });
+            dropConnection(conn.peer);
+        });
+
+        // Without this, a guest whose phone slept or briefly dropped Wi-Fi —
+        // the normal case at a party — stayed in the connection map forever.
+        // Every subsequent broadcast then tried to write to a dead channel and
+        // the client count was permanently wrong.
+        conn.on('error', (err) => {
+            console.warn('[PeerHost] Connection error, dropping peer:', conn.peer, err);
+            dropConnection(conn.peer);
+        });
+    };
+
+    const dropConnection = (peerId: string) => {
+        setConnections((prev) => {
+            if (!prev.has(peerId)) return prev;
+            const next = new Map(prev);
+            next.delete(peerId);
+            return next;
         });
     };
 
@@ -205,11 +289,4 @@ export function usePeerHost() {
     };
 }
 
-// Placeholder generators (will use actual implementation from shared)
-function generateRoomId(): string {
-    return Math.random().toString(36).substring(2, 15);
-}
 
-function generateJoinToken(): string {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-}

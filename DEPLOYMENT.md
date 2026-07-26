@@ -1,245 +1,74 @@
-# KaraokeNatin - Deployment Guide
+# Deployment
 
-## 📦 What to Ship
+> **Building releases is automated.** Pushing a `v*` tag builds Windows,
+> Linux and Android artifacts and publishes a GitHub Release. See
+> [docs/RELEASING.md](docs/RELEASING.md). The manual steps below are for
+> local builds and for understanding what the workflow does.
 
-### 1. 🖥️ Desktop Application (Host)
-**For**: Karaoke venue owner or home user with TV/projector
+## What ships
 
-**Build Command**:
-```powershell
-# From project root:
-build.bat windows
+**One artifact: the host application.** Guests install nothing — they scan a QR code and the host serves them the remote UI from its own embedded web server.
 
-# Or manually:
-cd apps\host
-pnpm tauri build
+Earlier versions of this document described deploying a Next.js web client to Vercel/Netlify and a Node signaling server to Railway/Heroku. Both of those applications have been deleted: signaling is now native Rust inside the host process, and the guest UI is compiled into the host binary. There is nothing to deploy to a cloud provider, and no running cost.
+
+## Desktop
+
+```bash
+pnpm run build
 ```
 
-**Output**:
-- NSIS: `src-tauri\target\release\bundle\nsis\KaraokeNatin_0.2.0_x64-setup.exe`
-- MSI: `src-tauri\target\release\bundle\msi\KaraokeNatin_0.2.0_x64_en-US.msi`
+Or, from `apps/host`: `pnpm tauri build`.
 
-**Distribution**:
-- Share the `.exe` or `.msi` installer file
-- User installs it on their Windows PC
-- App runs locally, no internet required (except for YouTube)
+Output lands in `apps/host/src-tauri/target/release/bundle/`.
 
----
+**Windows**
+- `nsis/KaraokeNatin_<version>_x64-setup.exe`
+- `msi/KaraokeNatin_<version>_x64_en-US.msi`
 
-### 2. 📱 Android Application (Host - Phone & TV)
-**For**: Android phone/tablet host or Android TV
+**Linux**
+- `deb/karaokenatin_<version>_amd64.deb`
+- `appimage/karaokenatin_<version>_amd64.AppImage`
 
-**Prerequisites**:
-- Android SDK with platform 36 and build-tools 36
+Linux builds need the GTK/WebKit development headers listed in `QUICK_START.md`. AppImage builds bundle the media framework, because WebKit relies on GStreamer for playback and a stock system may lack the codecs.
+
+## Android
+
+Prerequisites:
+- Android SDK (platform 36) and build-tools
 - Android NDK 27
-- Java JDK 21+
-- [cargo-ndk](https://github.com/nickelc/cargo-ndk) (`cargo install cargo-ndk`)
-- Rust Android targets (`rustup target add aarch64-linux-android`)
+- JDK 21+
+- `cargo install cargo-ndk`
+- `rustup target add aarch64-linux-android`
 
-**Build Command**:
-```powershell
-# From project root:
-build.bat android
-
-# Or manually:
-cd apps\host\src-tauri
-cargo ndk -t arm64-v8a -o gen/android/app/src/main/jniLibs build --release --lib --features tauri/custom-protocol
-cd gen\android
-.\gradlew.bat assembleArm64Release -x rustBuildArm64Release -x rustBuildUniversalRelease
-```
-
-**Sign the APK**:
-```powershell
-build.bat sign
-```
-
-**Output**:
-- Unsigned: `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk`
-- Signed: `KaraokeNatin-arm64-release.apk` (project root, after signing)
-
-**Distribution**:
-- Share the `.apk` for sideloading on phones/tablets
-- For Android TV: DPAD navigation is built in
-
----
-
-### 3. 📱 Web Client (Remote Control Website)
-**For**: Karaoke singers accessing from their phones
-
-**Build Command**:
-```powershell
-cd C:\Users\Noju\Projects\KaraokeNatin\apps\web-client
-pnpm build
-```
-
-**Output**: `/.next` folder (Next.js production build)
-
-**Deployment Options**:
-
-#### Option A: Vercel (Recommended - Free)
-```powershell
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-cd apps/web-client
-vercel --prod
-```
-Result: `https://karaoke-natin.vercel.app`
-
-#### Option B: Netlify
-- Connect GitHub repo
-- Build command: `cd apps/web-client && pnpm build`
-- Publish directory: `apps/web-client/.next`
-
-#### Option C: Self-hosted
-```powershell
-cd apps/web-client
-pnpm build
-pnpm start
-```
-Run on VPS with PM2 or Docker
-
----
-
-### 3. ☁️ Signaling Server
-**For**: Backend service that connects hosts and clients
-
-**Build Command**:
-```powershell
-cd C:\Users\Noju\Projects\KaraokeNatin\apps\signaling-server
-pnpm build
-```
-
-**Deployment Options**:
-
-#### Option A: Railway (Recommended - Free Tier)
-1. Create account at https://railway.app
-2. Click "New Project" → "Deploy from GitHub"
-3. Select your repo
-4. Set root directory: `apps/signaling-server`
-5. Railway auto-detects Node.js
-
-#### Option B: Heroku
-```powershell
-heroku create karaoke-signaling
-git subtree push --prefix apps/signaling-server heroku main
-```
-
-#### Option C: DigitalOcean/AWS/VPS
 ```bash
-# On server
-git clone <your-repo>
-cd apps/signaling-server
-npm install
-npm start
+./build.sh android           # unsigned
+./build.sh android_signed    # signed with your keystore
 ```
 
-Use PM2 for process management:
-```bash
-npm i -g pm2
-pm2 start dist/index.js --name signaling-server
-pm2 save
-```
+`build.bat` is the Windows equivalent. Both select the highest installed build-tools version rather than pinning one, so an SDK upgrade does not break the build.
 
----
+Signing configuration comes from `.env` (see `.env.example`): `KEYSTORE_PATH`, `KEYSTORE_ALIAS`, `KARAOKE_KS_PASS`. Keystores are gitignored — do not commit one.
 
-## 🔧 Configuration After Deployment
+## Network requirements
 
-### Update Web Client Environment
-Create `apps/web-client/.env.production`:
-```env
-NEXT_PUBLIC_SIGNALING_SERVER_URL=https://your-signaling-server.railway.app
-```
+The host binds `0.0.0.0` on a random port in 49152–65535 and advertises its LAN address via the QR code.
 
-### Update Desktop App
-Edit `apps/host/src/lib/usePeerHost.ts`:
-```typescript
-const SIGNALING_SERVER_URL = 'https://your-signaling-server.railway.app';
-```
+- **Guests must be on the same network as the host.** Access points with client isolation — common on venue and guest Wi-Fi — block guest-to-host traffic entirely, and no amount of configuration in the app works around it.
+- **Internet is needed for YouTube playback and search**, since the app streams from YouTube. Everything else — the guest UI, signaling, and the WebRTC handshake — is served locally and works without it.
+- Beyond allowing the app to accept LAN connections (Windows prompts on first run), no firewall configuration is needed.
 
-Then rebuild the desktop app.
+## Security notes
 
----
+- Guests authenticate with a join token carried in the QR URL, verified on every join. Sharing that URL shares access, and so does sharing a photo of the QR code.
+- LAN traffic is plain HTTP. On Android this requires `cleartextTrafficPermitted`; the reasoning and what it would take to remove that requirement are documented in `gen/android/app/src/main/res/xml/network_security_config.xml`.
+- Media and commands travel peer-to-peer over WebRTC; the host relays only the signaling handshake, locally.
+- The threat model is "someone else on your Wi-Fi", not the public internet. **Do not port-forward the host.** Nothing in it is hardened for internet exposure.
 
-## 🚀 Recommended Deployment Strategy
+## System requirements
 
-### For Public Use:
-
-1. **Deploy Signaling Server** → Railway (free, always online)
-   - URL: `https://karaoke-signaling.railway.app`
-
-2. **Deploy Web Client** → Vercel (free, global CDN)
-   - URL: `https://karaoke-natin.vercel.app`
-
-3. **Build Desktop App** → GitHub Releases
-   - Upload `.msi` installer
-   - Users download and install on their PCs
-
-### For Private/Local Use:
-
-1. **Skip cloud deployment**
-2. **Run signaling server locally**:
-   ```powershell
-   # On host PC
-   cd apps/signaling-server
-   pnpm start
-   ```
-
-3. **Access web client via local network**:
-   ```powershell
-   cd apps/web-client
-   pnpm build
-   pnpm start
-   # Access at http://192.168.1.X:3000
-   ```
-
-4. **Desktop app** connects to `localhost:3001`
-
----
-
-## 📊 System Requirements
-
-### Desktop Application
-- **OS**: Windows 10/11
-- **RAM**: 4GB minimum
-- **Storage**: 500MB
-- **Network**: Internet for YouTube, local network for P2P
-
-### Android Application
-- **OS**: Android 7.0+ (API 24)
-- **Architecture**: arm64-v8a (most modern Android devices)
-- **RAM**: 2GB minimum
-- **Network**: Internet for YouTube, local Wi-Fi for P2P
-
-### Web Client Users
-- **Device**: Any smartphone/tablet with modern browser
-- **Browser**: Chrome, Safari, Firefox, Edge (last 2 versions)
-- **Network**: Same WiFi network as desktop host
-
-### Signaling Server
-- **Platform**: Any Node.js 18+ environment
-- **Memory**: 256MB minimum
-- **Bandwidth**: ~1KB per connection (very light)
-
----
-
-## 🔐 Security Notes
-
-1. **Join Tokens**: Automatically generated and expire after 12 hours
-2. **Local P2P**: All video/audio stays on local network (not through server)
-3. **HTTPS**: Required for web client in production (WebRTC requirement)
-4. **CORS**: Configure in signaling server for your domain
-
----
-
-## 📝 Summary
-
-| Component | Type | Where to Deploy | Cost |
-|-----------|------|-----------------|------|
-| **Desktop App** | Installer | User's PC (Windows) | Free |
-| **Android App** | APK | Phone/Tablet/Android TV | Free |
-| **Web Client** | Website | Vercel/Netlify | Free |
-| **Signaling Server** | Backend | Railway/Heroku | Free Tier |
-
-**Total Cost**: $0 for basic deployment! 🎉
+| | Minimum |
+|---|---|
+| Windows | 10 1803+, WebView2 runtime, 4 GB RAM |
+| Linux | glibc 2.31+, GTK 3, WebKit2GTK 4.1, 4 GB RAM |
+| Android | 7.0 (API 24), arm64-v8a, 2 GB RAM |
+| Guest devices | Any browser with WebRTC — no install |

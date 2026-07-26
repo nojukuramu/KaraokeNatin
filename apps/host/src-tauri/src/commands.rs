@@ -305,11 +305,54 @@ pub async fn process_command(
         }
     }
     
-    // Emit state update event to frontend
-    let new_state = state.clone_state();
-    app.emit("room_state_updated", new_state)
+    emit_state(&app, &state)?;
+
+    Ok(())
+}
+
+/// Broadcast the room state to the frontend.
+///
+/// Emits two events deliberately:
+///   `room_state_updated` — full state, including personal collections, for the
+///                          host's own UI.
+///   `room_state_public`  — personal collections stripped, for rebroadcast to
+///                          guests over the data channel.
+///
+/// Keeping the filtered view on this side means the guest broadcast path never
+/// receives private data in the first place. Filtering in the frontend, as this
+/// previously did, left one `.filter()` standing between a guest and every
+/// personal playlist.
+fn emit_state(app: &AppHandle, state: &tauri::State<RoomStateManager>) -> Result<(), String> {
+    app.emit("room_state_updated", state.clone_state())
         .map_err(|e| e.to_string())?;
-    
+    app.emit("room_state_public", state.clone_public_state())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Broadcast only the player slice of the state.
+///
+/// The host player reports progress roughly every five seconds, and each report
+/// previously cloned and serialised the *entire* RoomState — queue plus every
+/// public collection — to every connected guest. With a large library that is
+/// tens of kilobytes per tick, per guest, over WebRTC, on phones, to convey a
+/// timestamp that moved.
+///
+/// `player` is a self-contained subtree, so patching it cannot desync anything
+/// else. Structural changes (queue, collections) deliberately keep emitting the
+/// full state: they are rare, and a patch protocol for them would need sequence
+/// numbers and a resync path to be safe. See OPTIMIZATION.md #1.
+fn emit_player_patch(
+    app: &AppHandle,
+    state: &tauri::State<RoomStateManager>,
+) -> Result<(), String> {
+    let player = state.clone_player();
+    // The host UI still wants the full object; it is in-process, so the cost is
+    // a clone rather than a serialise-and-transmit.
+    app.emit("room_state_updated", state.clone_state())
+        .map_err(|e| e.to_string())?;
+    app.emit("room_player_patch", player)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -332,12 +375,11 @@ pub fn update_player_state(
     });
     
     state.write().update_player(player_status, current_time, duration);
-    
-    // Emit state update
-    let new_state = state.clone_state();
-    app.emit("room_state_updated", new_state)
-        .map_err(|e| e.to_string())?;
-    
+
+    // Player ticks are by far the highest-frequency broadcast; patch instead of
+    // resending the whole room.
+    emit_player_patch(&app, &state)?;
+
     Ok(())
 }
 
@@ -473,16 +515,46 @@ pub fn playlist_import_collection(
     playlists.import_collection(&data)
 }
 
+/// Human-readable description of a dialog-returned `FilePath`, for logs and
+/// error messages. Handles both variants explicitly — never `.unwrap()`s —
+/// because on Android the dialog returns `FilePath::Url` (a `content://`
+/// URI), which has no filesystem path at all (`as_path()` is `None`).
+fn describe_file_path(path: &tauri_plugin_fs::FilePath) -> String {
+    match path {
+        tauri_plugin_fs::FilePath::Path(p) => p.display().to_string(),
+        tauri_plugin_fs::FilePath::Url(u) => u.to_string(),
+    }
+}
+
+/// Build a descriptive error for an I/O failure against a dialog-returned
+/// target, without needing the `FilePath` (and thus an `AppHandle`) in scope
+/// — kept separate from `describe_file_path` so it's trivially unit-testable.
+fn describe_io_error(action: &str, target: &str, err: &std::io::Error) -> String {
+    format!("Failed to {action} {target}: {err}")
+}
+
 /// Save a collection to a file (using system file dialog)
+///
+/// Uses `tauri_plugin_fs`'s `Fs` API (via `FsExt`) instead of converting the
+/// dialog's `FilePath` to a plain filesystem path: on Android the dialog can
+/// return a `content://` URI, which `as_path()` cannot resolve and which
+/// `into_path()` also can't turn into a real path (it only handles `file://`
+/// URLs). `Fs::open` handles both the desktop path case and the Android
+/// content-URI case (via the platform's `ContentResolver`), so it's the
+/// right layer to read/write through rather than reimplementing that here.
 #[tauri::command]
 pub async fn save_collection_to_file(
     collection_id: String,
     playlists: tauri::State<'_, PlaylistStore>,
     app: AppHandle,
 ) -> Result<(), String> {
+    use std::io::Write;
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_fs::{FsExt, OpenOptions};
+
     let json = playlists.export_collection(&collection_id)?;
     log::info!("Exporting collection {} (JSON length: {})", collection_id, json.len());
-    
+
     // Get a suggested filename from collection name
     let all = playlists.get_all();
     let col_name = all.iter()
@@ -490,50 +562,65 @@ pub async fn save_collection_to_file(
         .map(|c| c.name.clone())
         .unwrap_or_else(|| "playlist".to_string());
     let safe_name = col_name.replace(|c: char| !c.is_alphanumeric() && c != ' ' && c != '-' && c != '_', "");
-    
-    use tauri_plugin_dialog::DialogExt;
+
     let path = app.dialog()
         .file()
         .set_file_name(&format!("{}.karaoke.json", safe_name))
         .add_filter("KaraokeNatin Playlist", &["karaoke.json", "json"])
         .blocking_save_file();
-    
-    if let Some(file_path) = path {
-        let p = file_path.as_path().unwrap();
-        log::info!("Saving collection to: {:?}", p);
-        std::fs::write(p, &json)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
-        
-        // Final verification check
-        if let Ok(metadata) = std::fs::metadata(p) {
-            log::info!("Verified saved file size: {} bytes", metadata.len());
-        }
-        
-        Ok(())
-    } else {
-        Err("Save cancelled".into())
-    }
+
+    let Some(file_path) = path else {
+        return Err("Save cancelled".into());
+    };
+
+    let target = describe_file_path(&file_path);
+    log::info!("Saving collection to: {}", target);
+
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+
+    let mut file = app
+        .fs()
+        .open(file_path, opts)
+        .map_err(|e| describe_io_error("open for writing", &target, &e))?;
+
+    file.write_all(json.as_bytes())
+        .map_err(|e| describe_io_error("write", &target, &e))?;
+
+    log::info!("Saved collection to: {} ({} bytes)", target, json.len());
+
+    Ok(())
 }
 
 /// Load a collection from a file (using system file dialog)
+///
+/// See `save_collection_to_file` for why this goes through `tauri_plugin_fs`
+/// instead of `FilePath::as_path()`/`std::fs`.
 #[tauri::command]
 pub async fn load_collection_from_file(
     playlists: tauri::State<'_, PlaylistStore>,
     app: AppHandle,
 ) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_fs::FsExt;
+
     let path = app.dialog()
         .file()
         .add_filter("KaraokeNatin Playlist", &["karaoke.json", "json"])
         .blocking_pick_file();
-    
-    if let Some(file_path) = path {
-        let data = std::fs::read_to_string(file_path.as_path().unwrap())
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        playlists.import_collection(&data)
-    } else {
-        Err("Open cancelled".into())
-    }
+
+    let Some(file_path) = path else {
+        return Err("Open cancelled".into());
+    };
+
+    let target = describe_file_path(&file_path);
+
+    let data = app
+        .fs()
+        .read_to_string(file_path)
+        .map_err(|e| describe_io_error("read", &target, &e))?;
+
+    playlists.import_collection(&data)
 }
 
 // ============================================================
@@ -548,21 +635,129 @@ pub fn start_host_server() -> Result<u16, String> {
         return Ok(crate::web_server::get_server_port());
     }
 
-    std::thread::spawn(|| {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    // Bind synchronously, on this thread, so the port is a fact before we
+    // return it. The previous version spawned the server and slept 500ms
+    // hoping the bind had landed: wasted latency on a fast machine, and a race
+    // on a slow one, where get_qr_url could be called against a port that was
+    // not listening yet.
+    let (listener, port) = crate::web_server::bind_web_server().inspect_err(|_| {
+        // Binding failed, so nothing is listening — let a later attempt retry
+        // rather than latching the guard on a server that never started.
+        SERVER_STARTED.store(false, Ordering::SeqCst);
+    })?;
+
+    // Serving is the async half, and it owns its own runtime on a dedicated
+    // thread to keep the axum server off Tauri's executor.
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                // Previously an .expect() here panicked this thread silently.
+                log::error!("[Tauri] Failed to create Tokio runtime: {}", e);
+                return;
+            }
+        };
         rt.block_on(async {
-            log::info!("[Tauri] Starting embedded web server...");
-            if let Err(e) = crate::web_server::start_web_server().await {
+            log::info!("[Tauri] Serving embedded web server on port {}", port);
+            if let Err(e) = crate::web_server::serve_web_server(listener).await {
                 log::error!("[Tauri] Web server error: {}", e);
             }
         });
     });
 
-    // Wait for bind
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let port = crate::web_server::get_server_port();
-    log::info!("[Tauri] Web server (and signaling) on port {}", port);
+    log::info!("[Tauri] Web server (and signaling) bound on port {}", port);
     Ok(port)
+}
+
+// ============================================================
+// Diagnostics
+// ============================================================
+
+/// URL used by `report_issue`.
+const ISSUE_TRACKER_URL: &str = "https://github.com/nojukuramu/KaraokeNatin/issues/new";
+
+/// Reveal the directory containing the app's log files in the OS file manager.
+///
+/// Desktop only. Android has no user-visible file manager entry point for the
+/// app-private log directory, so this reports a clear error rather than
+/// pretending to succeed.
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        Err("Opening the log folder is not supported on Android.".to_string())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri::Manager;
+
+        let dir = app
+            .path()
+            .app_log_dir()
+            .map_err(|e| format!("Could not resolve the log directory: {}", e))?;
+
+        // The directory does not exist until the logger first writes to it.
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| format!("Could not create the log directory: {}", e))?;
+        }
+
+        open_path(&dir)
+    }
+}
+
+/// Open the issue tracker in the user's default browser.
+#[tauri::command]
+pub fn report_issue(app: AppHandle) -> Result<(), String> {
+    let _ = &app;
+    open_url(ISSUE_TRACKER_URL)
+}
+
+/// Open a filesystem path with the platform's file manager.
+#[cfg(not(target_os = "android"))]
+fn open_path(path: &std::path::Path) -> Result<(), String> {
+    let path_str = path.to_str().ok_or("Log directory path is not valid UTF-8")?;
+    spawn_opener(path_str)
+}
+
+/// Open a URL with the platform's default handler.
+fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // No process spawning on Android; the webview handles navigation.
+        Err(format!("Open this URL manually: {}", url))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        spawn_opener(url)
+    }
+}
+
+/// Hand a path or URL to the platform opener.
+///
+/// Deliberately not `tauri-plugin-shell`: that plugin is declared in
+/// package.json but present in neither Cargo.toml nor the capability file, so
+/// it does not actually work here. This spawns the OS opener directly and is
+/// compiled out on Android, where process spawning is unavailable.
+#[cfg(not(target_os = "android"))]
+fn spawn_opener(target: &str) -> Result<(), String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "windows")]
+    let result = Command::new("cmd").args(["/C", "start", "", target]).spawn();
+
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(target).spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = Command::new("xdg-open").arg(target).spawn();
+
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Could not open '{}': {}", target, e))
 }
 
 /// Response types
@@ -635,5 +830,40 @@ mod tests {
             extract_youtube_id("dQw4w9WgXcQ"),
             Some("dQw4w9WgXcQ".to_string())
         );
+    }
+
+    /// T13 regression coverage: `describe_file_path` must handle both
+    /// `FilePath` variants without panicking. The bug this fixes was an
+    /// `.unwrap()` on `FilePath::as_path()`, which is `None` for the
+    /// `FilePath::Url` variant Android's file dialog returns — that call
+    /// would have panicked here too if the same pattern were used.
+    #[test]
+    fn test_describe_file_path_handles_plain_paths() {
+        let path = tauri_plugin_fs::FilePath::Path(std::path::PathBuf::from("/tmp/playlist.karaoke.json"));
+        assert_eq!(describe_file_path(&path), "/tmp/playlist.karaoke.json");
+    }
+
+    #[test]
+    fn test_describe_file_path_handles_content_uris_without_panicking() {
+        // Shape of what Android's SAF file picker actually returns — not a
+        // filesystem path, so `FilePath::as_path()` is `None` and the old
+        // `.unwrap()` would panic on exactly this input.
+        let url = url::Url::parse(
+            "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fplaylist.json",
+        )
+        .expect("valid content URI");
+        let path = tauri_plugin_fs::FilePath::Url(url.clone());
+
+        assert_eq!(path.as_path(), None, "content URIs have no filesystem path");
+        assert_eq!(describe_file_path(&path), url.to_string());
+    }
+
+    #[test]
+    fn test_describe_io_error_includes_action_and_target() {
+        let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let msg = describe_io_error("open for writing", "content://example/doc", &err);
+        assert!(msg.contains("open for writing"));
+        assert!(msg.contains("content://example/doc"));
+        assert!(msg.contains("denied"));
     }
 }

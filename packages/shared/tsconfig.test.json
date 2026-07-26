@@ -1,0 +1,12 @@
+{
+    // Tests are excluded from the build config so they do not end up in the
+    // published dist/. They still need typechecking, though — this config
+    // covers them with noEmit. Wired into `pnpm run typecheck`.
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "types": ["vitest/globals"]
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist"]
+}

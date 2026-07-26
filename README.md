@@ -20,11 +20,11 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 - 📱 **Full Android Support (BETA)** — Host from Android phones, tablets, and TV
 - 📺 **TV Optimized** — Full spatial navigation (DPAD) support
 - 💿 **Refined Playlist Management** — Persistent library with import/export
-- 🖥️ **Windows & Android** — Run on Windows PCs, Android phones, tablets, or Android TV
+- 🖥️ **Windows, Linux & Android** — Run on Windows PCs, Linux desktops, Android phones, tablets, or Android TV
 - 📺 **Android TV Support** — DPAD navigation for big-screen experience
 - 🎬 **YouTube Integration** — Play any karaoke video directly from YouTube
 - 🔄 **Automatic Queue** — Songs automatically advance when finished
-- 📡 **Local Network** — Works over Wi-Fi, no internet required once songs are loaded
+- 📡 **Local Network** — Works over Wi-Fi — the guest UI, signaling and the WebRTC handshake are all served by the host itself. An internet connection is still needed to stream from YouTube
 - 🆓 **No Subscription** — Completely free with no recurring costs
 - 🌐 **Easy Setup** — Share a QR code for others to join your session
 
@@ -33,6 +33,7 @@ KaraokeNatin is a local-network karaoke application that lets you enjoy karaoke 
 ### Pre-built Releases
 Check the [Releases](https://github.com/nojukuramu/KaraokeNatin/releases) page for:
 - **Windows** — `.exe` (NSIS) or `.msi` installer
+- **Linux** — `.deb` or `.AppImage`
 - **Android** — `.apk` for phones, tablets, and Android TV (arm64)
 - *Note for Android TV*: You may need to use a file manager app to install the APK once downloaded.
 
@@ -47,7 +48,7 @@ See [Building](#-building-from-source) below.
 3. Enter your name and start adding songs!
 
 ### For Hosts
-1. Install KaraokeNatin on your Windows PC or Android device
+1. Install KaraokeNatin on your Windows PC, Linux desktop, or Android device
 2. Connect it to your TV or projector
 3. Launch the app and select **Host Mode**
 4. Share the QR code with your guests
@@ -84,7 +85,7 @@ build.bat sign
 
 ```powershell
 # 1. Install dependencies
-pnpm install
+pnpm run setup
 
 # 2. Build shared types
 pnpm --filter @karaokenatin/shared build
@@ -116,17 +117,25 @@ cd gen/android
 ```
 KaraokeNatin/
 ├── apps/
-│   ├── host/              # Tauri app (Windows + Android host)
-│   │   ├── src/           # React frontend (Vite)
-│   │   └── src-tauri/     # Rust backend (Tauri v2)
-│   ├── signaling-server/  # WebSocket signaling (embedded in host)
-│   └── web-client/        # Next.js remote control for phones
+│   └── host/                  # The whole application
+│       ├── src/               # React frontend (Vite) — the host window
+│       └── src-tauri/
+│           ├── src/           # Rust backend (Tauri v2)
+│           │   ├── commands.rs    # Tauri commands
+│           │   ├── room_state.rs  # queue + playlists, the source of truth
+│           │   ├── web_server.rs  # embedded axum server
+│           │   ├── signaling.rs   # room/join handling
+│           │   └── peer_server.rs # PeerJS broker (keeps WebRTC on the LAN)
+│           └── remote-ui/     # guest UI, compiled into the binary
 ├── packages/
-│   └── shared/            # Shared TypeScript types & protocols
-├── build.bat              # One-click build script
-├── start-dev.bat          # Development environment launcher
-└── CHANGELOG.md           # Version history
+│   └── shared/                # Shared TypeScript types & protocols
+├── build.sh / build.bat       # Build scripts
+├── start-dev.sh / .bat        # Development launchers
+└── CHANGELOG.md               # Version history
 ```
+
+There is no separate signaling service and no separate web client — both were
+folded into the host app. See `REPOMAPPING.md` for how the pieces connect.
 
 ## 🤝 Contributing
 

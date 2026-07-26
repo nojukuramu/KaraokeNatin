@@ -6,6 +6,7 @@ mod metadata;
 mod network;
 mod web_server;
 mod youtube;
+pub mod peer_server;
 mod signaling;
 
 use room_state::{RoomStateManager, PlaylistStore};
@@ -27,7 +28,12 @@ pub fn run() {
     );
 
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Backs `commands::save_collection_to_file` / `load_collection_from_file`:
+        // its `FsExt::fs()` can read/write through a `FilePath` returned by the
+        // dialog plugin even when that's an Android `content://` URI rather than
+        // a real filesystem path.
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(not(target_os = "android"))]
     {
@@ -92,6 +98,9 @@ pub fn run() {
             commands::playlist_import_collection,
             commands::save_collection_to_file,
             commands::load_collection_from_file,
+            // Diagnostics
+            commands::open_log_folder,
+            commands::report_issue,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

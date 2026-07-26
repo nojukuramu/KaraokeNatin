@@ -7,9 +7,14 @@ import ModeSelect from './components/ModeSelect';
 import Library from './components/Library';
 import { useRoomState } from './hooks/useRoomState';
 import { usePeerHost } from './hooks/usePeerHost';
+import HelpDialog from './components/HelpDialog';
 import { invoke } from '@tauri-apps/api/core';
-import { startHostServer } from './lib/commands';
-import { Clapperboard, SlidersHorizontal, Unplug, ArrowLeft } from 'lucide-react';
+import {
+  startHostServer,
+  loadCollectionFromFile,
+  playlistImportCollection,
+} from './lib/commands';
+import { Clapperboard, SlidersHorizontal, Unplug, ArrowLeft, HelpCircle } from 'lucide-react';
 
 // Initialize spatial navigation for DPAD / Android TV
 init({
@@ -157,6 +162,10 @@ function HostView({ onBack }: { onBack: () => void }) {
             onAddToPlaylist={handleAddToPlaylist}
             isPlaying={roomState?.player.status === 'playing'}
             currentSong={roomState?.player.currentSong || null}
+            volume={roomState?.player.volume}
+            isMuted={roomState?.player.isMuted}
+            currentTime={roomState?.player.currentTime}
+            duration={roomState?.player.duration}
             isMobile={isMobile}
             onBack={onBack}
           />
@@ -176,7 +185,10 @@ function GuestView({ onBack }: { onBack: () => void }) {
   const handleGuestConnect = useCallback((hostUrl: string) => {
     const url = new URL(hostUrl);
     url.searchParams.set('mode', 'inapp');
-    url.searchParams.set('t', Date.now().toString()); // Bust WebView cache
+    // Cache-buster. Named `_cb`, not `t`: `t` carries the join token from the
+    // scanned QR URL, and overwriting it with a timestamp would make every
+    // in-app guest connection fail token verification.
+    url.searchParams.set('_cb', Date.now().toString());
     setGuestHostUrl(url.toString());
     setGuestIframeLoaded(false);
     setShowScanner(false);
@@ -249,9 +261,11 @@ function GuestView({ onBack }: { onBack: () => void }) {
           }, '*');
         }
         else if (type === 'IMPORT_LOCAL_PLAYLIST') {
-          const json = await invoke<string>('load_collection_from_file');
+          const json = await loadCollectionFromFile();
           if (json) {
-            await invoke('playlist_import_collection', { json });
+            // Rust names this parameter `data`, not `json`. Routed through the
+            // typed wrapper so the name lives in exactly one place.
+            await playlistImportCollection(json);
             const playlists = await invoke('get_playlists');
             guestIframeRef.current.contentWindow?.postMessage({
               type: 'LOCAL_PLAYLISTS_UPDATED',
@@ -327,16 +341,28 @@ function GuestView({ onBack }: { onBack: () => void }) {
 // ---- Root App ----
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('select');
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleBack = useCallback(() => setAppMode('select'), []);
 
   if (appMode === 'select') {
     return (
-      <ModeSelect
-        onSelectHost={() => setAppMode('host')}
-        onSelectGuest={() => setAppMode('guest')}
-        onSelectLibrary={() => setAppMode('library')}
-      />
+      <>
+        <ModeSelect
+          onSelectHost={() => setAppMode('host')}
+          onSelectGuest={() => setAppMode('guest')}
+          onSelectLibrary={() => setAppMode('library')}
+        />
+        <button
+          className="help-fab"
+          onClick={() => setShowHelp(true)}
+          aria-label="Help and diagnostics"
+          title="Help and diagnostics"
+        >
+          <HelpCircle size={22} />
+        </button>
+        {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
+      </>
     );
   }
 

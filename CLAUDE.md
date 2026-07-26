@@ -1,0 +1,48 @@
+# CLAUDE.md
+
+**Read `REPOMAPPING.md` before making changes.** It covers how this repo actually works, which code paths are live versus dead, and the traps that reliably mislead readers. The rest of this file is the short version.
+
+## Non-negotiables
+
+1. **A third of the committed code is unreachable.** `apps/signaling-server/` and `apps/web-client/` are dead; signaling is Rust (`src-tauri/signaling.rs`) and guests get `src-tauri/remote-ui/index.html`. Confirm a path is live before extending it — see the table in REPOMAPPING.md.
+2. **`invoke()` is type-checked by neither `tsc` nor `cargo`.** When you add or edit one, open the Rust signature and verify the command name, argument names, and types. Missing commands and wrong argument names both exist in the tree right now.
+3. **New `#[tauri::command]` must be registered** in `generate_handler!` at `src-tauri/src/lib.rs`.
+4. **Protocol changes touch four places:** `packages/shared/src/p2p-protocol.ts`, the Rust `ClientCommand` enum in `commands.rs`, `remote-ui/index.html` (vanilla JS, not type-checked), and possibly `apps/web-client/`. Only some will fail to compile.
+5. **Two GUI surfaces, one backend.** A user-facing feature usually needs both `apps/host/src/components/ControlPanel.tsx` (host) and `remote-ui/index.html` (guest).
+6. **pnpm only.** Docs saying `npm install` are stale.
+7. **`packages/shared` must be built** (`cd packages/shared && pnpm build`) or imports fail to resolve.
+
+## Docs
+
+| File | Use for |
+|---|---|
+| `REPOMAPPING.md` | How to work here — rules, traps, where things live |
+| `REPO_MAP.md` | Structure: modules, entry points, runtime flows |
+| `FEATURES.md` | What exists, GUI layer vs logic layer |
+| `ISSUES.md` | Known defects with severity |
+| `OPTIMIZATION.md` | Improvement candidates, ranked |
+| `task.md` | The actionable backlog |
+| `docs/RELEASING.md` | How releases are built and signed |
+| `REPO_NOTES.md` | Audit reasoning, assumptions, open questions |
+
+`README.md` and `apps/host/RUN_INSTRUCTIONS.md` still contain stale claims; `QUICK_START.md` and `DEPLOYMENT.md` have been rewritten against the current architecture. Treat any doc claim as a hypothesis to check against code.
+
+## Verifying
+
+```bash
+pnpm run check      # typecheck + frontend tests + Rust tests
+pnpm run test       # vitest only
+pnpm run test:rust  # cargo test only
+pnpm run lint:rust  # clippy
+```
+
+CI (`.github/workflows/ci.yml`) runs the same gates on every push. Releases are built by `.github/workflows/release.yml` — see `docs/RELEASING.md`.
+
+The tests worth knowing about, because they guard traps the compilers do not:
+- `tauri-commands.test.ts` — parses every `invoke` against the Rust signatures. Catches missing commands and wrong argument names.
+- `rust-parity.test.ts` — asserts the protocol agrees across `packages/shared`, `commands.rs` and `remote-ui/index.html`.
+- `tests/peer_broker.rs` — connects two real WebSocket clients through the embedded broker.
+
+## Before finishing
+
+State what you actually verified, and run `pnpm run check`. Note that no test covers the UI end to end, so anything user-facing still needs a look at the running app.

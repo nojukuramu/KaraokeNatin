@@ -1,68 +1,75 @@
 # Tauri Host Application
 
-Desktop karaoke host built with Tauri v2 (Rust backend + React frontend).
+The whole KaraokeNatin application: a Tauri v2 app with a Rust backend and a React frontend, targeting Windows, Linux and Android (phone, tablet, TV).
+
+It plays YouTube video and, from a web server embedded in its own backend, serves a remote-control page to guests on the same network. Nothing else needs to be installed or deployed.
 
 ## Features
 
-- YouTube player integration (IFrame API)
-- Unified Room State management (Rust)
-- WebRTC P2P host (PeerJS)
-- QR code generation for client pairing
-- `yt-dlp` sidecar for metadata scraping
+- YouTube playback via the IFrame API, plus search and metadata through the pure-Rust `rusty_ytdl` crate — no external binaries
+- Room state owned by Rust (`room_state.rs`) and broadcast to guests
+- WebRTC peer-to-peer with a **self-hosted** PeerJS broker (`peer_server.rs`), so the handshake never leaves the LAN
+- Socket.io signaling with join-token verification (`signaling.rs`)
+- QR-code pairing, playlist collections with public/personal visibility, and mic-coverage scoring
 
-## Project Structure
+## Structure
 
 ```
-host/
-├── src/                    # React frontend
-│   ├── components/
-│   ├── hooks/
-│   └── lib/
-└── src-tauri/              # Rust backend
+apps/host/
+├── src/                        # React frontend (Vite)
+│   ├── components/             # Player, ControlPanel, Library, Queue, …
+│   ├── hooks/                  # useRoomState, usePeerHost, useMicCoverage, useWakeLock
+│   └── lib/                    # typed invoke() wrappers, crypto helpers
+└── src-tauri/                  # Rust backend
     ├── src/
-    │   ├── main.rs
-    │   ├── commands/
-    │   ├── room_state.rs
-    │   └── sidecar/
-    ├── binaries/           # yt-dlp executables (add manually)
-    └── Cargo.toml
+    │   ├── lib.rs              # Tauri builder, state, command registration
+    │   ├── commands.rs         # every #[tauri::command]
+    │   ├── room_state.rs       # queue + playlists, the source of truth
+    │   ├── web_server.rs       # embedded axum server
+    │   ├── signaling.rs        # room creation / join verification
+    │   ├── peer_server.rs      # PeerJS broker
+    │   ├── youtube.rs          # search, with a bounded cache
+    │   └── metadata.rs         # video metadata
+    ├── remote-ui/              # guest UI, compiled into the binary
+    │   └── vendor/             # pinned JS libs, so guests work offline
+    └── gen/android/            # Android project (manifest and gradle are hand-edited)
 ```
 
 ## Setup
 
-This app requires Tauri v2 CLI. Initialize with:
+From the **repository root**, not this directory:
 
 ```bash
-# Install Tauri CLI (once)
-npm install -g @tauri-apps/cli@next
-
-# Initialize Tauri project (creates src-tauri/)
-npm create tauri-app@latest
-# Select: React, TypeScript
-
-# Install dependencies
-npm install
+pnpm run setup
 ```
 
-## yt-dlp Sidecar Setup
+pnpm is required — the workspace uses `workspace:` protocol dependencies. This also builds `packages/shared`, which `apps/host` imports by package `main`; skipping it produces unresolved-module errors.
 
-Download platform-specific yt-dlp binaries and place in `src-tauri/binaries/`:
-
-- Windows: `yt-dlp-x86_64-pc-windows-msvc.exe`
-- macOS Intel: `yt-dlp-x86_64-apple-darwin`
-- macOS Silicon: `yt-dlp-aarch64-apple-darwin`
-- Linux: `yt-dlp-x86_64-unknown-linux-gnu`
-
-Download from: https://github.com/yt-dlp/yt-dlp/releases
+Linux additionally needs GTK/WebKit headers — see `QUICK_START.md`.
 
 ## Development
 
 ```bash
-npm run tauri dev
+pnpm run dev:host    # from the repo root
+```
+
+The embedded web server starts lazily when you pick Host Mode, not at launch.
+
+## Verify
+
+```bash
+pnpm run check       # typecheck + frontend tests + Rust tests
 ```
 
 ## Build
 
 ```bash
-npm run tauri build
+pnpm run build       # desktop, current platform
+./build.sh android   # APK (build.bat on Windows)
 ```
+
+Releases are built by `.github/workflows/release.yml` — see `docs/RELEASING.md`.
+
+## Notes for contributors
+
+`invoke()` is type-checked by neither `tsc` nor `cargo`. When adding one, open the Rust signature and check the command name and argument names; `tauri-commands.test.ts` will catch you if you don't. See `REPOMAPPING.md` for the rest of the traps in this codebase.

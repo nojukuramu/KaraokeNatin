@@ -1793,3 +1793,116 @@ body {
     white-space: nowrap;
   }
 }
+/* Floating help button on the mode-select screen. Sized for touch (44px) and
+   offset for notches / TV overscan. */
+.help-fab {
+    position: fixed;
+    right: calc(1rem + env(safe-area-inset-right, 0px));
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+    border-radius: 50%;
+    background: var(--surface, rgba(30, 30, 40, 0.85));
+    color: var(--text, #e8e8f0);
+    cursor: pointer;
+    z-index: 900;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.help-fab:hover,
+.help-fab:focus-visible {
+    background: var(--surface-hover, rgba(60, 60, 80, 0.95));
+    transform: scale(1.06);
+    outline: none;
+}
+
+.help-fab:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent, #6c5ce7);
+}
+
+/* ---- Transport: seek + volume ----
+   Range inputs are styled for both pointer and D-pad use: a 44px-tall hit area
+   for touch, and a visible focus ring since spatial navigation moves focus
+   without a cursor to follow. */
+.player-seek-row,
+.player-volume-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.player-time,
+.player-volume-value {
+    font-size: 0.75rem;
+    color: var(--text-muted, #9a9aae);
+    font-variant-numeric: tabular-nums;
+    min-width: 3.2em;
+}
+
+.player-time:last-of-type,
+.player-volume-value {
+    text-align: right;
+}
+
+.player-volume-icon {
+    color: var(--text-muted, #9a9aae);
+    flex-shrink: 0;
+}
+
+.player-seek,
+.player-volume {
+    flex: 1;
+    min-width: 0;
+    height: 44px;              /* touch target; the visible track is drawn thin */
+    background: transparent;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.player-seek::-webkit-slider-runnable-track,
+.player-volume::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border, rgba(255, 255, 255, 0.18));
+}
+
+.player-seek::-moz-range-track,
+.player-volume::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border, rgba(255, 255, 255, 0.18));
+}
+
+.player-seek::-webkit-slider-thumb,
+.player-volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, #6c5ce7);
+}
+
+.player-seek::-moz-range-thumb,
+.player-volume::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, #6c5ce7);
+}
+
+.player-seek:focus-visible,
+.player-volume:focus-visible {
+    outline: 2px solid var(--accent, #6c5ce7);
+    outline-offset: 2px;
+    border-radius: 4px;
+}

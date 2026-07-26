@@ -27,7 +27,7 @@ parking_lot = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 chrono = "0.4"
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 local-ip-address = "0.6"
@@ -37,9 +37,23 @@ socketioxide = { version = "0.13", features = ["state"] }
 rusty_ytdl = { version = "0.7", default-features = false, features = ["search", "live", "rustls-tls"] }
 # Random port selection
 rand = "0.8"
+# WebSocket stream splitting for the embedded PeerJS broker
+futures-util = "0.3"
 # File picker dialogs
 tauri-plugin-dialog = "2"
+# Already pulled in transitively by tauri-plugin-dialog; declared directly so
+# we can use its `FsExt`/`Fs` API to read/write through the `FilePath` the
+# dialog returns (handles Android `content://` URIs, which are not real
+# filesystem paths — see commands.rs T13 fix).
+tauri-plugin-fs = "2"
 
 # Desktop-only plugins (single-instance not supported on Android)
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+[dev-dependencies]
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+# Test-only: constructs a `FilePath::Url` (content:// URI) to exercise the
+# T13 fix without needing an Android device.
+url = "2"

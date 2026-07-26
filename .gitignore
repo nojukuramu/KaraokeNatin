@@ -11,6 +11,20 @@ build/
 # Tauri
 apps/host/src-tauri/target/
 
+# Tauri Android: generated build output. The gen/android config (manifest,
+# gradle, network security config) IS tracked because it carries hand edits;
+# only the compiled frontend assets copied in at build time are ignored.
+apps/host/src-tauri/gen/android/app/src/main/assets/
+apps/host/src-tauri/gen/android/app/build/
+apps/host/src-tauri/gen/android/.gradle/
+apps/host/src-tauri/gen/apple/
+
+# Runtime error logs
+error_log*.txt
+
+# TS build info
+*.tsbuildinfo
+
 # Logs
 *.log
 npm-debug.log*
@@ -41,3 +55,5 @@ out/
 *.jks
 KaraokeNatin-*.apk
 KaraokeNatin-*.idsig
+# Generated at build time from tauri.conf.json (see .github/workflows/release.yml)
+apps/host/src-tauri/gen/android/tauri.properties

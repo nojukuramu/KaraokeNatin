@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **The WebRTC handshake no longer leaves the LAN.** PeerJS was constructed without `host`/`port`/`path`, so it silently used the public `0.peerjs.com` cloud broker — meaning guests could not connect at all without internet, and a third-party outage would break every install at once. A PeerJS-compatible broker is now embedded in the host's own web server.
+- **Join tokens are actually verified.** Verification was skipped whenever `roomId` was empty or `"default"`, and the shipped guest UI sent exactly that, so the token was decorative. Verification is now unconditional and the token travels in the QR URL. Room credentials use a CSPRNG instead of `Math.random()`, and hash comparison is constant-time.
+- **A clean clone builds.** `packages/shared` was unbuildable — no `rootDir`, so output landed at `dist/src/index.js` while `main` pointed at `dist/index.js`.
+- **Three commands invoked by the UI did not exist** (`open_log_folder`, `report_issue`, `fetch_song_metadata`); two more call sites passed argument names Rust does not declare, silently breaking Guest Mode playlist import.
+- **Collection import/export no longer crashes on Android**, where the file dialog returns a `content://` URI that the old code unwrapped as a filesystem path.
+- Entering Host Mode no longer sleeps 500 ms hoping the server bound; the port is now known before the command returns.
+- The YouTube search cache is bounded — it previously grew for the lifetime of the process.
+- Guest visibility filtering moved into Rust, so personal playlists never reach the broadcast path.
+
+### Added
+- **Volume, mute and seek controls.** These existed in the protocol and the Rust backend but had no UI *and* were never applied to the player.
+- **Mic-based scoring.** Replaces `Math.random()` with a measure of how much of the song had mic input.
+- **"Play next"** — bump a song to the front of the queue.
+- **Screen wake lock** during playback; the display previously slept mid-song on Android and Android TV.
+- **Help dialog** is now reachable; it was fully built but never rendered.
+- **Linux builds** — `deb` and `AppImage` targets, plus POSIX `build.sh`, `start-dev.sh` and `clean_android_build.sh`.
+- **CI and release workflows.** Every push runs typecheck, 44 frontend tests and 36 Rust tests; pushing a `v*` tag builds and publishes Windows, Linux and Android artifacts.
+- **Offline guest UI** — socket.io, PeerJS, qrcodejs and lucide are vendored at pinned versions instead of loaded from CDNs on every page load.
+- Host-side P2P liveness: `PONG` replies, error-drop, and a sweep for dead channels.
+- Repository documentation: `REPOMAPPING.md`, `REPO_MAP.md`, `FEATURES.md`, `ISSUES.md`, `OPTIMIZATION.md`, `REPO_NOTES.md`, `task.md`, `docs/RELEASING.md`.
+
+### Changed
+- Player progress ticks send a `STATE_PATCH` instead of rebroadcasting the entire room every few seconds.
+- Android manifest no longer requests `MODIFY_AUDIO_SETTINGS`, `CHANGE_WIFI_STATE` or `FOREGROUND_SERVICE`; the user-CA trust anchor is removed from the network security config.
+
+### Removed
+- `apps/signaling-server` and `apps/web-client` — both were complete applications that nothing in the shipped product reached. Signaling is native Rust; the guest UI is compiled into the host binary.
+- Committed build artifacts: an `.apk.idsig`, two error logs, and a stale frontend bundle under `gen/android` that an Android build could pick up instead of fresh output.
+- yt-dlp license files; the dependency was replaced by `rusty_ytdl` and no external binary is bundled.
+
 ## [0.2.0] - 2026-02-10
 
 ### Added

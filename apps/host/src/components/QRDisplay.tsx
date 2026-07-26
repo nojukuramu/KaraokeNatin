@@ -13,26 +13,38 @@ const QRDisplay = ({ url, roomId: _roomId }: QRDisplayProps) => {
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
-        // Fetch the local network URL from the Tauri backend
+        // `url` comes from usePeerHost and already carries the join token
+        // (?t=...). Prefer it: a URL fetched from get_qr_url has no token, and
+        // since signaling now verifies tokens on every join, a guest scanning
+        // a tokenless QR would simply be rejected.
+        if (url) {
+            setDisplayUrl(url);
+            setLoading(false);
+            return;
+        }
+
+        // Fallback only for the window between mount and the room being
+        // created. Shows the right host address so the panel is not blank.
+        let cancelled = false;
         const fetchQrUrl = async () => {
             try {
                 const qrUrl = await invoke<string>('get_qr_url');
-                setDisplayUrl(qrUrl);
-                setLoading(false);
+                if (!cancelled) setDisplayUrl(qrUrl);
             } catch (error) {
                 console.error('Failed to get QR URL:', error);
-                // Use dynamic port from backend, avoid hardcoded port
                 try {
                     const port = await invoke<number>('get_server_port');
-                    setDisplayUrl(url || `http://localhost:${port}`);
+                    if (!cancelled) setDisplayUrl(`http://localhost:${port}`);
                 } catch {
-                    setDisplayUrl(url || window.location.origin);
+                    if (!cancelled) setDisplayUrl(window.location.origin);
                 }
-                setLoading(false);
+            } finally {
+                if (!cancelled) setLoading(false);
             }
         };
 
         fetchQrUrl();
+        return () => { cancelled = true; };
     }, [url]);
 
     const copyLink = async () => {

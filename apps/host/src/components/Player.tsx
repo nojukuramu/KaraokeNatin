@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRoomState } from '../hooks/useRoomState';
+import { useMicCoverage, coverageToScore } from '../hooks/useMicCoverage';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { invoke } from '@tauri-apps/api/core';
 import { useFocusable, FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import ScoringOverlay from './ScoringOverlay';
@@ -20,6 +22,13 @@ interface YouTubePlayer {
     getCurrentTime(): number;
     getDuration(): number;
     getPlayerState(): number;
+    // Transport controls driven by SET_VOLUME / TOGGLE_MUTE / SEEK.
+    setVolume(volume: number): void;
+    getVolume(): number;
+    mute(): void;
+    unMute(): void;
+    isMuted(): boolean;
+    seekTo(seconds: number, allowSeekAhead: boolean): void;
     destroy(): void;
 }
 
@@ -67,25 +76,36 @@ const Icons = {
     )
 };
 
-// Generate random score (70-100, 0.5% chance of 101)
-const generateScore = (): number => {
-    const perfectChance = Math.random() < 0.005; // 0.5% chance
-    if (perfectChance) return 101;
-    return Math.floor(Math.random() * 31) + 70; // 70-100
-};
-
 const Player = () => {
     const playerRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const ytPlayerRef = useRef<YouTubePlayer | null>(null);
     const timePollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const { roomState } = useRoomState();
+
+    // Keep the display awake while a song is playing. The host is typically
+    // unattended on a TV, so letting the screen sleep mid-song is a real
+    // failure rather than a nicety.
+    useWakeLock(roomState?.player.status === 'playing');
     const [isAPIReady, setIsAPIReady] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const currentSongRef = useRef(roomState?.player.currentSong);
     const [showScoring, setShowScoring] = useState(false);
     const [currentScore, setCurrentScore] = useState(0);
     const [lastSongTitle, setLastSongTitle] = useState('');
+
+    // Real scoring: coverage of the song's runtime with mic-level input.
+    // start()/stop() are referentially stable across renders (see the hook),
+    // so it's safe to call them from refs/closures captured at various times.
+    const { start: micStart, stop: micStop } = useMicCoverage();
+    // Whether we've already attempted to start mic capture for the *current*
+    // song (guards against re-starting on every PLAYING transition, e.g.
+    // after a buffering pause/resume).
+    const micAttemptedRef = useRef(false);
+    // Whether mic capture actually succeeded for the current song (permission
+    // granted, device available). Only true between a successful start() and
+    // the next stop()/song change.
+    const micActiveRef = useRef(false);
 
     const { ref: focusRef, focusKey } = useFocusable();
 
@@ -196,6 +216,16 @@ const Player = () => {
         switch (state) {
             case window.YT.PlayerState.PLAYING:
                 status = 'playing';
+                // Start mic coverage tracking the first time this song
+                // actually starts playing (not on every PLAYING transition,
+                // e.g. resuming after a buffering pause). Permission is
+                // only ever prompted here — never at app launch.
+                if (!micAttemptedRef.current) {
+                    micAttemptedRef.current = true;
+                    void micStart().then((started) => {
+                        micActiveRef.current = started;
+                    });
+                }
                 break;
             case window.YT.PlayerState.PAUSED:
                 status = 'paused';
@@ -260,17 +290,45 @@ const Player = () => {
         }, 1000);
     };
 
-    // Handle song ended - show scoring then skip
+    // Handle song ended - show scoring (real mic-coverage score) then skip.
+    // Mic failures must never block the queue: if capture never started for
+    // this song (denied, unavailable, errored), skip straight to the next
+    // song instead of showing a score.
     const handleSongEnded = useCallback(async () => {
         // Save the song title before it changes
         const songTitle = roomState?.player.currentSong?.title || '';
         setLastSongTitle(songTitle);
 
-        // Generate and show score
-        const score = generateScore();
-        setCurrentScore(score);
-        setShowScoring(true);
-    }, [roomState?.player.currentSong?.title]);
+        const wasTracking = micActiveRef.current;
+        micAttemptedRef.current = false;
+        micActiveRef.current = false;
+
+        if (!wasTracking) {
+            try {
+                await invoke('process_command', {
+                    command: { type: 'SKIP' },
+                });
+            } catch (error) {
+                console.error('[Player] Failed to skip song:', error);
+            }
+            return;
+        }
+
+        try {
+            const coverage = await micStop();
+            setCurrentScore(coverageToScore(coverage));
+            setShowScoring(true);
+        } catch (error) {
+            console.error('[Player] Failed to read mic coverage, skipping score:', error);
+            try {
+                await invoke('process_command', {
+                    command: { type: 'SKIP' },
+                });
+            } catch (skipError) {
+                console.error('[Player] Failed to skip song:', skipError);
+            }
+        }
+    }, [roomState?.player.currentSong?.title, micStop]);
 
     // Called when scoring animation completes
     const handleScoringComplete = useCallback(async () => {
@@ -291,6 +349,16 @@ const Player = () => {
         if (currentSong && currentSong.id !== currentSongRef.current?.id) {
             currentSongRef.current = currentSong;
 
+            // A new song is loading. If mic capture from the previous song
+            // is still running (e.g. it was manually skipped before
+            // handleSongEnded ever fired), tear it down now so the mic
+            // indicator doesn't leak into the next song.
+            if (micAttemptedRef.current) {
+                micAttemptedRef.current = false;
+                micActiveRef.current = false;
+                void micStop();
+            }
+
             if (ytPlayerRef.current) {
                 console.log('[Player] Loading video:', currentSong.youtubeId);
                 // loadVideoById auto-plays by default in YouTube API
@@ -299,12 +367,17 @@ const Player = () => {
         } else if (!currentSong && currentSongRef.current) {
             // Song was removed (queue empty after skip) - stop the player
             currentSongRef.current = null;
+            if (micAttemptedRef.current) {
+                micAttemptedRef.current = false;
+                micActiveRef.current = false;
+                void micStop();
+            }
             if (ytPlayerRef.current) {
                 console.log('[Player] Stopping video - no current song');
                 ytPlayerRef.current.stopVideo();
             }
         }
-    }, [roomState?.player.currentSong]);
+    }, [roomState?.player.currentSong, micStop]);
 
     // Handle player status changes from room state
     useEffect(() => {
@@ -318,6 +391,58 @@ const Player = () => {
             ytPlayerRef.current.pauseVideo();
         }
     }, [roomState?.player.status]);
+
+    // Apply volume and mute from room state.
+    //
+    // SET_VOLUME and TOGGLE_MUTE already updated RoomState in Rust, but nothing
+    // ever pushed those values into the YouTube player, so the commands were
+    // inert end to end. This is the half that makes them audible.
+    const volume = roomState?.player.volume;
+    const isMuted = roomState?.player.isMuted;
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || volume === undefined) return;
+        try {
+            player.setVolume(Math.max(0, Math.min(100, volume)));
+        } catch (e) {
+            console.warn('[Player] setVolume failed:', e);
+        }
+    }, [volume, isAPIReady]);
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || isMuted === undefined) return;
+        try {
+            if (isMuted) player.mute();
+            else player.unMute();
+        } catch (e) {
+            console.warn('[Player] mute toggle failed:', e);
+        }
+    }, [isMuted, isAPIReady]);
+
+    // Apply externally requested seeks.
+    //
+    // currentTime is bidirectional: the player reports progress into it every
+    // second, and SEEK writes into it. Reacting to every change would fight our
+    // own reporting, so only a divergence larger than normal playback drift is
+    // treated as a real seek request.
+    const stateTime = roomState?.player.currentTime;
+    const SEEK_EPSILON_SECONDS = 2.5;
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || stateTime === undefined) return;
+        try {
+            const actual = player.getCurrentTime?.();
+            if (typeof actual !== 'number') return;
+            if (Math.abs(actual - stateTime) > SEEK_EPSILON_SECONDS) {
+                player.seekTo(stateTime, true);
+            }
+        } catch (e) {
+            console.warn('[Player] seek failed:', e);
+        }
+    }, [stateTime]);
 
     const currentSong = roomState?.player.currentSong;
 

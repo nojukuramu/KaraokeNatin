@@ -6,13 +6,18 @@ interface ScoringOverlayProps {
     songTitle?: string;
 }
 
+// Matches useMicCoverage's FULL_COVERAGE_THRESHOLD (0.9) mapped through
+// coverageToScore's 90-100 randomized band: scores in that band mean the
+// singer covered essentially the whole song.
+const FULL_COVERAGE_SCORE_THRESHOLD = 90;
+
 const ScoringOverlay = ({ score, onComplete, songTitle }: ScoringOverlayProps) => {
     const [phase, setPhase] = useState<'intro' | 'score' | 'exit'>('intro');
-    const isPerfect = score === 101;
+    const isFullCoverage = score >= FULL_COVERAGE_SCORE_THRESHOLD;
 
     useEffect(() => {
         // Phase timing
-        const timers: number[] = [];
+        const timers: ReturnType<typeof setTimeout>[] = [];
 
         // Intro phase (0.5s)
         timers.push(setTimeout(() => setPhase('score'), 500));
@@ -41,11 +46,11 @@ const ScoringOverlay = ({ score, onComplete, songTitle }: ScoringOverlayProps) =
 
                 {phase === 'score' && (
                     <>
-                        <div className={`score-display ${isPerfect ? 'perfect-score' : ''}`}>
+                        <div className={`score-display ${isFullCoverage ? 'perfect-score' : ''}`}>
                             {score}
                         </div>
                         <div className="score-label">
-                            {isPerfect ? '⭐ PERFECT! ⭐' : 'Great performance!'}
+                            {isFullCoverage ? '🎤 Sang the whole song!' : 'Great performance!'}
                         </div>
                         {songTitle && (
                             <div className="score-song-title">{songTitle}</div>

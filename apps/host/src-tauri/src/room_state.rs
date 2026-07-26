@@ -118,10 +118,14 @@ impl PlaylistStore {
                     
                     if old_playlists_json.exists() {
                         log::info!("Migrating existing playlists.json from {:?}", old_playlists_json);
-                        if let Ok(_) = fs::copy(&old_playlists_json, &path) {
-                            // Optionally remove if you want to be clean, but maybe safer to keep for now
-                            // let _ = fs::remove_file(&old_playlists_json);
+                        if let Err(e) = fs::copy(&old_playlists_json, &path) {
+                            log::error!(
+                                "Failed to migrate playlists.json from {:?} to {:?}: {}",
+                                old_playlists_json, path, e
+                            );
                         }
+                        // Optionally remove if you want to be clean, but maybe safer to keep for now
+                        // let _ = fs::remove_file(&old_playlists_json);
                     } else {
                         // Try migrating legacy playlist.json
                         let mut legacy_json = old_path.clone();
@@ -168,14 +172,6 @@ impl PlaylistStore {
     /// Get a snapshot of all playlists
     pub fn get_all(&self) -> Vec<PlaylistCollection> {
         self.playlists.read().clone()
-    }
-
-    /// Get only public playlists (for broadcasting to remotes)
-    pub fn get_public(&self) -> Vec<PlaylistCollection> {
-        self.playlists.read().iter()
-            .filter(|c| c.visibility == CollectionVisibility::Public)
-            .cloned()
-            .collect()
     }
 
     /// Create a new playlist collection, returns its ID
@@ -691,6 +687,11 @@ impl RoomStateManager {
     }
 
     /// Clone the current state (full, including personal collections — for host UI)
+    /// Clone only the player slice, for high-frequency progress broadcasts.
+    pub fn clone_player(&self) -> PlayerState {
+        self.state.read().player.clone()
+    }
+
     pub fn clone_state(&self) -> RoomState {
         self.state.read().clone()
     }

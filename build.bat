@@ -39,7 +39,23 @@ if "%JAVA_HOME%"=="" (
     exit /b 1
 )
 
-set BUILD_TOOLS=%ANDROID_HOME%\build-tools\36.0.0
+REM --- Pick the highest installed build-tools version instead of a hardcoded one ---
+REM NOTE: this sorts build-tools directory names lexicographically (dir /o-n),
+REM not as true semantic versions. That matches numeric order for the
+REM current style of version strings (e.g. "36.0.0" > "35.0.0" > "9.0.0")
+REM as long as the major version has the same digit count; it is not a
+REM guaranteed-correct semver comparison.
+set BUILD_TOOLS_VERSION=
+for /f "delims=" %%V in ('dir /b /ad /o-n "%ANDROID_HOME%\build-tools" 2^>nul') do (
+    if not defined BUILD_TOOLS_VERSION set BUILD_TOOLS_VERSION=%%V
+)
+if not defined BUILD_TOOLS_VERSION (
+    echo ERROR: No Android build-tools found under %ANDROID_HOME%\build-tools
+    echo        Install one via: sdkmanager "build-tools;VERSION"
+    exit /b 1
+)
+set BUILD_TOOLS=%ANDROID_HOME%\build-tools\%BUILD_TOOLS_VERSION%
+echo Using Android build-tools %BUILD_TOOLS_VERSION% ^(%BUILD_TOOLS%^)
 
 REM --- Keystore Configuration ---
 if "%KEYSTORE_PATH%"=="" set KEYSTORE_PATH=karaokenatin.keystore

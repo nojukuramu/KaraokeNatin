@@ -1,0 +1,140 @@
+name: CI
+
+# A release workflow existed here once and was deleted, leaving nothing to catch
+# regressions — no tests, no linter, no build check. This restores a gate.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Typecheck and test (frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds packages/shared first — apps/host imports it by package main,
+      # so a missing dist/ fails typecheck rather than anything more obvious.
+      # Also typechecks the test files, which are excluded from the build
+      # config so they do not ship in dist/.
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
+
+      # Typecheck does not exercise Vite. A bundle that fails to build would
+      # otherwise only surface in the release workflow, after a tag is cut.
+      - name: Build frontend
+        run: pnpm run build
+        working-directory: apps/host
+
+  rust:
+    name: Test and lint (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Tauri needs GTK/WebKit headers to build at all on Linux.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/host/src-tauri
+
+      - name: Check formatting
+        run: cargo fmt --check
+        working-directory: apps/host/src-tauri
+        continue-on-error: true # advisory until the existing tree is formatted
+
+      - name: Clippy
+        run: cargo clippy --all-targets
+        working-directory: apps/host/src-tauri
+
+      - name: Test
+        run: cargo test
+        working-directory: apps/host/src-tauri
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: [frontend, rust]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/host/src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared types
+        run: pnpm run build:shared
+
+      - name: Build frontend
+        run: pnpm run build
+        working-directory: apps/host
+
+      # Proves the Rust side compiles for release on both platforms without
+      # paying for full bundle/installer generation on every push.
+      - name: Compile Tauri backend
+        run: cargo build --release --lib
+        working-directory: apps/host/src-tauri
