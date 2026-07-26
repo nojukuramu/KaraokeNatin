@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import Peer, { DataConnection } from 'peerjs';
 import { io, Socket } from 'socket.io-client';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { HostBroadcast, isClientCommand, RoomState } from '@karaokenatin/shared';
 import { processCommand, getRoomState } from '../lib/commands';
 import { hashToken, generateRoomId, generateJoinToken } from '../lib/security';
@@ -83,7 +84,6 @@ export function usePeerHost() {
         let socketInstance: Socket | null = null;
 
         const setup = async () => {
-        const { invoke } = await import('@tauri-apps/api/core');
         // The broker lives in our own Rust web server, so we need its port
         // before constructing the Peer.
         const port = await invoke<number>('get_server_port');
@@ -182,8 +182,7 @@ export function usePeerHost() {
             if (msg && msg.type === 'SEARCH' && typeof msg.query === 'string') {
                 console.log('[PeerHost] Processing SEARCH:', msg.query);
                 try {
-                    const { invoke } = await import('@tauri-apps/api/core');
-                    const results = await invoke('search_youtube', {
+                                const results = await invoke('search_youtube', {
                         query: msg.query,
                         limit: msg.limit || 5
                     });

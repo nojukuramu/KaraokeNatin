@@ -40,6 +40,12 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      # Typecheck does not exercise Vite. A bundle that fails to build would
+      # otherwise only surface in the release workflow, after a tag is cut.
+      - name: Build frontend
+        run: pnpm run build
+        working-directory: apps/host
+
   rust:
     name: Test and lint (Rust)
     runs-on: ubuntu-latest
