@@ -22,7 +22,7 @@
 | `ISSUES.md` | Known defects with severity |
 | `OPTIMIZATION.md` | Improvement candidates, ranked |
 | `task.md` | The actionable backlog |
-| `docs/RELEASING.md` | How releases are built and signed |
+| `docs/RELEASING.md` | How release artifacts are built |
 | `REPO_NOTES.md` | Audit reasoning, assumptions, open questions |
 
 `README.md` and `apps/host/RUN_INSTRUCTIONS.md` still contain stale claims; `QUICK_START.md` and `DEPLOYMENT.md` have been rewritten against the current architecture. Treat any doc claim as a hypothesis to check against code.
@@ -36,7 +36,7 @@ pnpm run test:rust  # cargo test only
 pnpm run lint:rust  # clippy
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same gates on every push. Releases are built by `.github/workflows/release.yml` — see `docs/RELEASING.md`.
+CI (`.github/workflows/ci.yml`) runs the same gates on every push. Release artifacts (Windows installers, Android APK) are built by `.github/workflows/build-release.yml` — restored verbatim from the last version known to work in this repo; see `docs/RELEASING.md` for what it does and does not do.
 
 The tests worth knowing about, because they guard traps the compilers do not:
 - `tauri-commands.test.ts` — parses every `invoke` against the Rust signatures. Catches missing commands and wrong argument names.
