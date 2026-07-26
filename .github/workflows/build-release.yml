@@ -164,11 +164,11 @@ jobs:
 
       - name: Initialize Android project
         working-directory: apps/host
-        run: npx tauri android init --skip-targets-install
+        run: pnpm exec tauri android init --skip-targets-install
 
       - name: Build Android APK
         working-directory: apps/host
-        run: npx tauri android build
+        run: pnpm exec tauri android build
 
       - name: Find APK files
         run: |

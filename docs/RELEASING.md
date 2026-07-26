@@ -7,7 +7,7 @@ Two workflows live in `.github/workflows/`:
 | `ci.yml` | every push and PR | nothing — it proves the code is correct |
 | `build-release.yml` | push/PR to `main`/`master`, or manual dispatch | Windows installers and an Android APK, as run artifacts |
 
-`build-release.yml` is restored verbatim from the version that last worked in this repo (`e767525`/`f0659ad^`, February 2026) rather than rewritten, so its behavior below is exactly what it always did — nothing added, nothing hardened.
+`build-release.yml` is restored from the version that last worked in this repo (`e767525`/`f0659ad^`, February 2026), with one deliberate change: the Android job's two `npx tauri ...` invocations became `pnpm exec tauri ...`. Everything else is untouched. See "Known state" below for why.
 
 ## What it does
 
@@ -26,7 +26,7 @@ This exact file has one confirmed successful run: [21795050307](https://github.c
 
 **The Android job has never succeeded in this repository's Actions history**, including in that same run — it failed in under 90 seconds, before reaching the NDK/Gradle steps. Every other recorded `build-release.yml` run failed on both jobs. Neither `v0.1.3-beta` nor `v0.2.0-beta` was built by this workflow — no workflow file existed in the repo when either was tagged, so those releases were built and uploaded locally.
 
-None of that is a reason not to run it — it's restored because you asked for the exact known config rather than a rewrite, and because Windows is proven to work from it. If the Android job fails again, that's consistent with its entire history here, not a regression from this restore.
+The Android job's original failure — `npm error could not determine executable to run` — was diagnosed and fixed after this restore. Root cause: the job ran `npx tauri android ...`, and `npx` on this project resolves against the npm registry rather than the locally installed `@tauri-apps/cli`, because this is a pnpm-managed workspace with no npm lockfile for `npx`'s local-bin check to key off. Reproducible directly: `npx tauri --version` fails with that exact error, `pnpm exec tauri --version` succeeds instantly. The Windows job never hit this because it invokes Tauri through `pnpm --filter ... run tauri:build` — pnpm's own script runner, not `npx` — which is very likely why Windows is this workflow's only recorded success and Android never has been, even six months ago. Fixed by swapping both `npx tauri android ...` calls to `pnpm exec tauri android ...`; nothing else about the job changed.
 
 ## Running it
 
@@ -45,8 +45,8 @@ pnpm --filter @karaokenatin/host run tauri:build   # Windows/desktop
 
 ```bash
 cd apps/host
-npx tauri android init --skip-targets-install
-npx tauri android build
+pnpm exec tauri android init --skip-targets-install
+pnpm exec tauri android build
 ```
 
 The repo's own `build.sh` / `build.bat` are a separate, more built-out path (cargo-ndk, keystore signing, highest-installed build-tools detection) — see those scripts directly if you need a signed APK. `build-release.yml` does not use them; it drives everything through the Tauri CLI instead.
