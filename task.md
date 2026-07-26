@@ -80,7 +80,7 @@ Four claims drive most of this backlog and none were confirmed on running hardwa
   Not done: cleartext is still permitted globally. Android's `<domain>` matches only exact literal hostnames/IPs — no CIDR, and `includeSubdomains` is ignored for IP literals — so 10/8, 172.16/12 and 192.168/16 cannot be expressed, and the host's LAN IP is only known at runtime. A stricter config was written and reverted: denying cleartext by default breaks *every* guest connection, and shipping an app that cannot do its one job is not a security win.
   **To actually close this**, pick one: serve the host over HTTPS with a self-signed cert pinned in the client, or validate at the call site that the destination is RFC1918/loopback before issuing a cleartext request. Then flip the base-config and mean it.
 
-- [ ] **T13 — Handle Android content URIs in file dialogs.** *(I-3.9)* — **M**
+- [x] **T13 — Handle Android content URIs in file dialogs.** *(I-3.9)* — **M**
   `commands.rs:502,531` call `.as_path().unwrap()`; Android returns content URIs where `as_path()` is `None`. Return an error instead of panicking, and read via the plugin's URI-aware API.
   *Blocked by V4.*
 
@@ -147,12 +147,12 @@ Ordering matters here; see O-"Suggested sequence".
 - [x] **T27 — Fix list keys.** *(I-4.6, O-6)* — **S**
   Index keys on lists that reorder by design break reconciliation and lose D-pad focus. Songs have stable `id`s. *Prerequisite for T28/T29 doing what they claim.*
 
-- [ ] **T28 — Virtualize playlist and queue lists.** *(I-3.8, O-2)* — **L**
+- [ ] **T28 — Virtualize playlist and queue lists.** *(attempted, not landed)* *(I-3.8, O-2)* — **L**
   `ControlPanel.tsx:794`, `Library.tsx:504`, `Queue.tsx:107` render every row unvirtualized. Largest rendering cost in the app, worst on the Android TV target.
   *Complication: virtualized rows unmount, so spatial-navigation focus registration must be reconciled with windowing. Answer to Q3 changes how hard this is.*
   *Cheap partial win if deferred: `loading="lazy"` + explicit dimensions on thumbnails.*
 
-- [ ] **T29 — Memoize the ControlPanel render path.** *(O-5)* — **M**
+- [ ] **T29 — Memoize the ControlPanel render path.** *(not started; gated on T28)* *(O-5)* — **M**
   829 lines, 17 `useState`, inline handlers so every child prop is a fresh reference. Consolidate the six parallel `Set` states into a reducer.
   *Do after T28 — memoizing a component whose cost is 300 unvirtualized rows moves little.*
 
@@ -160,10 +160,10 @@ Ordering matters here; see O-"Suggested sequence".
   Every mutation serializes the entire `RoomState` to every peer (~34 KB × 8 guests for one "move song up"). `STATE_PATCH` is defined and never used.
   *Requires sequence numbers and a resync path, or it trades bandwidth for desync. **Do not attempt before T33.***
 
-- [ ] **T31 — Bound the YouTube search cache.** *(O-7)* — **S**
+- [x] **T31 — Bound the YouTube search cache.** *(O-7)* — **S**
   `youtube.rs:37-39` has no eviction — unbounded growth over a long-running host session. Add an LRU cap. Also rate-limit guest-initiated searches, which currently have none.
 
-- [ ] **T32 — Replace the server-start sleep with a real signal.** *(I-3.10, O-8)* — **S**
+- [x] **T32 — Replace the server-start sleep with a real signal.** *(I-3.10, O-8)* — **S**
   `commands.rs:544-566` sleeps 500 ms and returns with no proof the listener bound. Bind on the calling thread, hand the port back over a channel. Removes fixed startup latency and a race.
 
 ---
@@ -177,11 +177,11 @@ Ordering matters here; see O-"Suggested sequence".
 - [x] **T34 — Add linting.** *(I-4.9)* — **S**
   No ESLint, Prettier, clippy, or rustfmt config. `clippy` would surface much of I-4.10 automatically.
 
-- [ ] **T35 — Reconcile the documentation with the code.** *(I-4.7)* — **M**
+- [x] **T35 — Reconcile the documentation with the code.** *(I-4.7)* — **M**
   yt-dlp download instructions for a dependency migrated to `rusty_ytdl` (plus 4473 lines of stale license files); `C:\Users\Noju\...` paths in three docs; `npm install` in a pnpm-only repo; `0.2.0-beta` vs `0.2.0` vs CHANGELOG.
   *Do last — docs should describe the post-fix state.*
 
-- [ ] **T36 — Tidy Rust hygiene.** *(I-4.10)* — **M**
+- [x] **T36 — Tidy Rust hygiene.** *(I-4.10)* — **M**
   `SCREAMING_CASE` enum variants (use serde renames), swallowed `fs::copy` error at `room_state.rs:121`, discarded socket emits, `Any` CORS on a `0.0.0.0` listener, and the `peer_id: socket.id` placeholder at `signaling.rs:253` that never propagates the guest's real PeerJS id.
 
 - [ ] **T37 — Finish or remove multi-room scaffolding.** *(I-3.11)* — **M** `[?]`
