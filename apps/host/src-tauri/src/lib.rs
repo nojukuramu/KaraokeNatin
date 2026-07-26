@@ -28,7 +28,12 @@ pub fn run() {
     );
 
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Backs `commands::save_collection_to_file` / `load_collection_from_file`:
+        // its `FsExt::fs()` can read/write through a `FilePath` returned by the
+        // dialog plugin even when that's an Android `content://` URI rather than
+        // a real filesystem path.
+        .plugin(tauri_plugin_fs::init());
 
     #[cfg(not(target_os = "android"))]
     {

@@ -31,35 +31,69 @@ pub fn get_server_port() -> u16 {
     ACTUAL_PORT.load(Ordering::SeqCst)
 }
 
-/// Check if a port is available
-async fn is_port_available(port: u16) -> bool {
-    tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
-        .await
-        .is_ok()
-}
-
-/// Find an available port using random selection in the ephemeral range
-async fn find_available_port() -> u16 {
+/// Bind a TCP listener on an available port, synchronously.
+///
+/// This used to be async and run *inside* the spawned tokio runtime in
+/// `commands::start_host_server`, which meant that command had no way to
+/// know when (or whether) the bind actually succeeded — it just slept for a
+/// fixed 500ms and hoped. Binding with `std::net::TcpListener` here lets the
+/// caller do it on the calling thread, learn the real port, and only then
+/// spin up the runtime that serves on it (see `serve_web_server`).
+///
+/// Returns the bound (but not yet async-registered) listener plus the port
+/// it landed on. The listener is left in blocking mode; `serve_web_server`
+/// is responsible for handing it to tokio.
+pub fn bind_web_server() -> Result<(std::net::TcpListener, u16), String> {
     use rand::Rng;
     let mut rng = rand::thread_rng();
 
-    // Try random ports in the IANA ephemeral range (49152–65535)
+    // Try random ports in the IANA ephemeral range (49152–65535).
+    let mut bound = None;
     for _ in 0..20 {
         let port = rng.gen_range(49152..=65535);
-        if is_port_available(port).await {
-            return port;
+        if let Ok(listener) = std::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))) {
+            bound = Some(listener);
+            break;
         }
     }
 
-    // Fallback to OS-assigned port
-    log::warn!("[WebServer] No random ports available, using OS-assigned port");
-    0
+    let listener = match bound {
+        Some(listener) => listener,
+        None => {
+            log::warn!("[WebServer] No random ports available, falling back to an OS-assigned port");
+            std::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], 0)))
+                .map_err(|e| format!("[WebServer] Failed to bind any port: {}", e))?
+        }
+    };
+
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("[WebServer] Failed to read bound port: {}", e))?
+        .port();
+
+    ACTUAL_PORT.store(port, Ordering::SeqCst);
+    log::info!("[WebServer] Bound to port {}", port);
+
+    Ok((listener, port))
 }
 
-/// Start the embedded web server
-pub async fn start_web_server() -> Result<(), String> {
-    let port = find_available_port().await;
-    
+/// Serve the embedded web server on an already-bound listener.
+///
+/// Must be called from within a tokio runtime (this is the async half of
+/// startup — see `bind_web_server` for the synchronous half, which must run
+/// first so the caller already knows the port before this starts).
+pub async fn serve_web_server(listener: std::net::TcpListener) -> Result<(), String> {
+    let port = listener
+        .local_addr()
+        .map(|a| a.port())
+        .unwrap_or_else(|_| get_server_port());
+
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| format!("[WebServer] Failed to set listener non-blocking: {}", e))?;
+    let listener = tokio::net::TcpListener::from_std(listener)
+        .map_err(|e| format!("[WebServer] Failed to attach listener to the async runtime: {}", e))?;
+
     log::info!("[WebServer] Starting embedded web server on port {}", port);
 
     // Initialize Socket.io with connection limits
@@ -97,32 +131,33 @@ pub async fn start_web_server() -> Result<(), String> {
         .route("/vendor/qrcodejs-1.0.0.min.js", get(serve_vendor_qrcodejs))
         .route("/vendor/lucide-1.27.0.min.js", get(serve_vendor_lucide))
         .merge(peer_routes)
-        .layer(layer) // Socket.io layer
-        // Add CORS for local development
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(layer); // Socket.io layer
+
+    // CORS: every legitimate caller here is same-origin by construction.
+    // `remote-ui/index.html` only ever talks back to `window.location.origin`
+    // (see its `signalingUrl`/PeerJS `host`/`port` setup) and it is always
+    // loaded *from* this exact server — standalone in a guest's phone
+    // browser, or in the host app's Guest Mode iframe pointed at
+    // `http://<lan-ip>:port/?mode=inapp`. Same-origin requests are not
+    // subject to CORS at all, so this layer does nothing for any real guest.
+    // What `Any` origin *does* do is let any other page a LAN-connected
+    // browser happens to have open — a malicious site, a DNS-rebinding
+    // attack — read this server's responses cross-origin. Restrict it to
+    // debug builds, where a separately-hosted Vite dev server legitimately
+    // needs cross-origin access to hit this backend directly; release builds
+    // (the only ones guests ever actually use) don't need it and shouldn't
+    // have it.
+    #[cfg(debug_assertions)]
+    let app = app.layer(
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any),
+    );
+
+    let app = app
         // Limit concurrent connections to prevent resource exhaustion
         .layer(tower::limit::ConcurrencyLimitLayer::new(64));
-
-    // Bind to all network interfaces
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    
-    // Create TCP listener
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("[WebServer] Failed to bind: {}", e))?;
-    
-    // Store the actual port (in case OS assigned one)
-    let actual_port = listener.local_addr()
-        .map(|a| a.port())
-        .unwrap_or(port);
-    ACTUAL_PORT.store(actual_port, Ordering::SeqCst);
-    
-    log::info!("[WebServer] Listening on port {}", actual_port);
 
     // Start server
     match axum::serve(listener, app).await {

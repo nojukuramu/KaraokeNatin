@@ -84,7 +84,7 @@ build.bat sign
 
 ```powershell
 # 1. Install dependencies
-pnpm install
+pnpm run setup
 
 # 2. Build shared types
 pnpm --filter @karaokenatin/shared build
@@ -116,17 +116,25 @@ cd gen/android
 ```
 KaraokeNatin/
 ├── apps/
-│   ├── host/              # Tauri app (Windows + Android host)
-│   │   ├── src/           # React frontend (Vite)
-│   │   └── src-tauri/     # Rust backend (Tauri v2)
-│   ├── signaling-server/  # WebSocket signaling (embedded in host)
-│   └── web-client/        # Next.js remote control for phones
+│   └── host/                  # The whole application
+│       ├── src/               # React frontend (Vite) — the host window
+│       └── src-tauri/
+│           ├── src/           # Rust backend (Tauri v2)
+│           │   ├── commands.rs    # Tauri commands
+│           │   ├── room_state.rs  # queue + playlists, the source of truth
+│           │   ├── web_server.rs  # embedded axum server
+│           │   ├── signaling.rs   # room/join handling
+│           │   └── peer_server.rs # PeerJS broker (keeps WebRTC on the LAN)
+│           └── remote-ui/     # guest UI, compiled into the binary
 ├── packages/
-│   └── shared/            # Shared TypeScript types & protocols
-├── build.bat              # One-click build script
-├── start-dev.bat          # Development environment launcher
-└── CHANGELOG.md           # Version history
+│   └── shared/                # Shared TypeScript types & protocols
+├── build.sh / build.bat       # Build scripts
+├── start-dev.sh / .bat        # Development launchers
+└── CHANGELOG.md               # Version history
 ```
+
+There is no separate signaling service and no separate web client — both were
+folded into the host app. See `REPOMAPPING.md` for how the pieces connect.
 
 ## 🤝 Contributing
 

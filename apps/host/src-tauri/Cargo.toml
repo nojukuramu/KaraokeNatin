@@ -41,6 +41,11 @@ rand = "0.8"
 futures-util = "0.3"
 # File picker dialogs
 tauri-plugin-dialog = "2"
+# Already pulled in transitively by tauri-plugin-dialog; declared directly so
+# we can use its `FsExt`/`Fs` API to read/write through the `FilePath` the
+# dialog returns (handles Android `content://` URIs, which are not real
+# filesystem paths — see commands.rs T13 fix).
+tauri-plugin-fs = "2"
 
 # Desktop-only plugins (single-instance not supported on Android)
 [target.'cfg(not(target_os = "android"))'.dependencies]
@@ -49,3 +54,6 @@ tauri-plugin-single-instance = "2"
 [dev-dependencies]
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+# Test-only: constructs a `FilePath::Url` (content:// URI) to exercise the
+# T13 fix without needing an Android device.
+url = "2"

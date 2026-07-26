@@ -1,6 +1,6 @@
 {
     "name": "karaokenatin",
-    "version": "0.2.0-beta",
+    "version": "0.2.0",
     "private": true,
     "description": "LAN karaoke system: Tauri host app with an embedded web server and browser-based guest remotes",
     "license": "MIT",

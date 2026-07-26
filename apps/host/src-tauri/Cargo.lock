@@ -126,12 +126,14 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-log",
  "tauri-plugin-single-instance",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tower 0.5.3",
  "tower-http",
+ "url",
  "uuid",
 ]
 
