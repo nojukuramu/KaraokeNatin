@@ -149,12 +149,13 @@ Ordering matters here; see O-"Suggested sequence".
 - [x] **T27 — Fix list keys.** *(I-4.6, O-6)* — **S**
   Index keys on lists that reorder by design break reconciliation and lose D-pad focus. Songs have stable `id`s. *Prerequisite for T28/T29 doing what they claim.*
 
-- [ ] **T28 — Virtualize playlist and queue lists.** *(attempted, not landed)* *(I-3.8, O-2)* — **L**
+- [~] **T28 — Virtualize playlist and queue lists.** *(Library done; TV surfaces deliberately not)* *(I-3.8, O-2)* — **L**
   `ControlPanel.tsx:794`, `Library.tsx:504`, `Queue.tsx:107` render every row unvirtualized. Largest rendering cost in the app, worst on the Android TV target.
   *Complication: virtualized rows unmount, so spatial-navigation focus registration must be reconciled with windowing. Answer to Q3 changes how hard this is.*
   *Cheap partial win if deferred: `loading="lazy"` + explicit dimensions on thumbnails.*
 
-- [ ] **T29 — Memoize the ControlPanel render path.** *(not started; gated on T28)* *(O-5)* — **M**
+- [~] **T29 — Memoize the ControlPanel render path.** *(reducer + tests landed; wiring pending)* *(O-5)* — **M**
+  `addStatusReducer.ts` consolidates the six parallel `Set` states and is unit-tested, but is not yet imported by `ControlPanel.tsx`. An attempt at the full migration (memoized row components + `useCallback` handlers) was left in a non-compiling state and reverted rather than committed; redo it as one complete change.
   829 lines, 17 `useState`, inline handlers so every child prop is a fresh reference. Consolidate the six parallel `Set` states into a reducer.
   *Do after T28 — memoizing a component whose cost is 300 unvirtualized rows moves little.*
 
