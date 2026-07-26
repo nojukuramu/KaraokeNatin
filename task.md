@@ -156,7 +156,9 @@ Ordering matters here; see O-"Suggested sequence".
   829 lines, 17 `useState`, inline handlers so every child prop is a fresh reference. Consolidate the six parallel `Set` states into a reducer.
   *Do after T28 — memoizing a component whose cost is 300 unvirtualized rows moves little.*
 
-- [ ] **T30 — Replace full-state broadcast with `STATE_PATCH`.** *(I-3.5, O-1)* — **L**
+- [~] **T30 — Replace full-state broadcast with `STATE_PATCH`.** *(I-3.5, O-1)* — **L**
+  **Done for the case that dominates traffic.** Player progress ticks (~every 5s) now send `STATE_PATCH` with the `player` subtree instead of the whole room. `player` is self-contained, so replacing it wholesale cannot desync anything else — which is why this needed no sequence numbers. 8 tests pin the merge contract.
+  **Still open:** queue and collection mutations still send full state. Patching those does *not* have the self-containment property and would need sequence numbers plus a resync path; doing it without those trades a bandwidth problem for a consistency problem.
   Every mutation serializes the entire `RoomState` to every peer (~34 KB × 8 guests for one "move song up"). `STATE_PATCH` is defined and never used.
   *Requires sequence numbers and a resync path, or it trades bandwidth for desync. **Do not attempt before T33.***
 
