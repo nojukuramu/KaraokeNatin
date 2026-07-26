@@ -1,298 +1,168 @@
-name: Release
+name: Build Release
 
-# Produces the installable artifacts: Windows .exe/.msi, Linux .deb/.AppImage,
-# and an Android .apk. CI (ci.yml) proves the code is correct; this workflow
-# produces the things people actually download.
+# Produces the two artifacts that matter: a Windows .exe installer and an
+# Android .apk.
 #
-# Triggers:
-#   - pushing a v* tag  -> builds everything and publishes a GitHub Release
-#   - manual dispatch   -> builds everything and uploads artifacts only
+# This is based on the workflow that previously worked in this repo
+# (.github/workflows/build-release.yml, removed in f0659ad) rather than a
+# hand-rolled build, because that one was known to produce working artifacts.
+# The important details carried over from it:
+#   - `pnpm --filter <pkg> run build`, not `cd <dir> && pnpm run build`.
+#     The cd form does not resolve workspace binaries on a clean CI install.
+#   - `tauri android build` via the Tauri CLI, rather than driving cargo-ndk
+#     and Gradle by hand.
+#   - NDK 27.0.12077973, the version this project is known to build against.
 on:
   push:
-    tags: ['v*']
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: 'Publish a GitHub Release (tag builds do this automatically)'
-        type: boolean
-        default: false
-
-permissions:
-  contents: write # needed to create the release
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Desktop: Windows (.exe via NSIS, .msi) and Linux (.deb, .AppImage)
-  # ---------------------------------------------------------------------------
-  desktop:
-    name: Desktop (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: windows-installers
-          - os: ubuntu-latest
-            artifact_name: linux-packages
+  build-windows:
+    name: Build Windows (.exe / .msi)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
         with:
-          node-version: 22
-          cache: pnpm
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: apps/host/src-tauri
-
-      # Tauri links against GTK/WebKit on Linux; without these the build fails
-      # at pkg-config with a "gdk-3.0 not found" error rather than anything
-      # that points at the real cause.
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            patchelf \
-            pkg-config
+          workspaces: './apps/host/src-tauri -> target'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # apps/host imports @karaokenatin/shared by package main, so this must
-      # happen before anything typechecks or bundles.
-      - name: Build shared types
-        run: pnpm run build:shared
+      # apps/host imports @karaokenatin/shared by package main, so this has to
+      # produce dist/ before the frontend will typecheck.
+      - name: Build shared package
+        run: pnpm --filter @karaokenatin/shared run build
 
-      - name: Build frontend
-        run: pnpm run build
-        working-directory: apps/host
+      - name: Build host frontend
+        run: pnpm --filter @karaokenatin/host run build
 
-      - name: Build Tauri bundles
-        run: pnpm tauri build
-        working-directory: apps/host
+      - name: Build Tauri app
+        run: pnpm --filter @karaokenatin/host run tauri:build
 
-      - name: Collect artifacts (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p dist-release
-          find apps/host/src-tauri/target/release/bundle -type f \
-            \( -name '*.exe' -o -name '*.msi' \) -exec cp {} dist-release/ \;
-          ls -la dist-release
-
-      - name: Collect artifacts (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p dist-release
-          find apps/host/src-tauri/target/release/bundle -type f \
-            \( -name '*.deb' -o -name '*.AppImage' \) -exec cp {} dist-release/ \;
-          ls -la dist-release
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload NSIS installer (.exe)
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: dist-release/*
+          name: windows-installer-exe
+          path: apps/host/src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
-  # Android: arm64 APK, signed when keystore secrets are configured
-  # ---------------------------------------------------------------------------
-  android:
-    name: Android APK (arm64)
+      - name: Upload MSI installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-msi
+          path: apps/host/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+  build-android:
+    name: Build Android (.apk)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - name: Get pnpm store directory
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
         with:
-          node-version: 22
-          cache: pnpm
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '21'
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
 
       - uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
-        id: ndk
         run: |
-          sdkmanager --install "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          sdkmanager "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> $GITHUB_ENV
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
         with:
-          targets: aarch64-linux-android
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/host/src-tauri
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
+          workspaces: './apps/host/src-tauri -> target'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared types
-        run: pnpm run build:shared
+      - name: Build shared package
+        run: pnpm --filter @karaokenatin/shared run build
 
-      - name: Build frontend
-        run: pnpm run build
+      - name: Build host frontend
+        run: pnpm --filter @karaokenatin/host run build
+
+      - name: Initialize Android project
         working-directory: apps/host
+        run: npx tauri android init --skip-targets-install
 
-      # Mirrors build.sh's android target: cross-compile the Rust lib into
-      # jniLibs, copy the built frontend into the Android assets directory,
-      # then let Gradle assemble. The rustBuild* Gradle tasks are excluded
-      # because cargo-ndk has already produced the .so.
-      - name: Cross-compile Rust for arm64
+      # `android init` regenerates gen/android. Two files there carry hand
+      # edits that must survive: the trimmed permission set, and the network
+      # security config (the app talks plain HTTP to a LAN IP, so cleartext is
+      # load-bearing — see the comments in that file). Restoring them from git
+      # makes the build independent of whatever init decides to write.
+      - name: Restore hand-edited Android config
         run: |
-          cargo ndk -t arm64-v8a \
-            -o gen/android/app/src/main/jniLibs \
-            build --release --lib --features tauri/custom-protocol
-        working-directory: apps/host/src-tauri
+          git checkout -- \
+            apps/host/src-tauri/gen/android/app/src/main/AndroidManifest.xml \
+            apps/host/src-tauri/gen/android/app/src/main/res/xml/network_security_config.xml
+          echo "--- permissions in effect ---"
+          grep 'uses-permission' apps/host/src-tauri/gen/android/app/src/main/AndroidManifest.xml
 
-      - name: Stage frontend assets
-        run: |
-          ASSETS=apps/host/src-tauri/gen/android/app/src/main/assets
-          rm -rf "$ASSETS"
-          mkdir -p "$ASSETS"
-          cp -r apps/host/dist/. "$ASSETS/"
-          ls -la "$ASSETS"
+      - name: Build Android APK
+        working-directory: apps/host
+        run: npx tauri android build
 
-      # gen/android/app/build.gradle.kts reads versionCode/versionName from
-      # tauri.properties, which is not in the repo — so without this every APK
-      # would ship versionCode 1 and Android would refuse to install it as an
-      # upgrade over a previous build. versionCode must increase monotonically;
-      # the run number does that and never resets.
-      - name: Generate Android version properties
-        run: |
-          set -euo pipefail
-          VERSION="$(node -p "require('./apps/host/src-tauri/tauri.conf.json').version")"
-          VERSION_CODE="${{ github.run_number }}"
-          printf 'tauri.android.versionName=%s\ntauri.android.versionCode=%s\n' \
-            "$VERSION" "$VERSION_CODE" \
-            > apps/host/src-tauri/gen/android/tauri.properties
-          cat apps/host/src-tauri/gen/android/tauri.properties
+      - name: Locate APKs
+        run: find apps/host/src-tauri/gen/android -name '*.apk' -print
 
-      - name: Assemble APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleArm64Release \
-            -x rustBuildArm64Release \
-            -x rustBuildUniversalRelease \
-            --warning-mode=summary
-        working-directory: apps/host/src-tauri/gen/android
-
-      # Signing is optional so forks and first-time runs still produce a
-      # testable (unsigned) APK instead of failing the whole workflow.
-      # The secret is passed through env rather than interpolated into the
-      # script body: `${{ secrets.X }}` inline would splice its contents into
-      # the shell, where a malformed value could be interpreted as commands.
-      - name: Check for signing secrets
-        id: signing
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "${KEYSTORE_B64:-}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set — publishing an UNSIGNED APK, which Android will refuse to install. See docs/RELEASING.md for setup."
-          fi
-
-      - name: Sign APK
-        if: steps.signing.outputs.available == 'true'
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          set -euo pipefail
-          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)"
-          echo "Using build-tools at $BUILD_TOOLS"
-
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-
-          APK_DIR=apps/host/src-tauri/gen/android/app/build/outputs/apk/arm64/release
-          UNSIGNED="$(find "$APK_DIR" -name '*.apk' | head -n1)"
-          echo "Signing $UNSIGNED"
-
-          "$BUILD_TOOLS/zipalign" -f 4 "$UNSIGNED" "$RUNNER_TEMP/aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign \
-            --ks "$RUNNER_TEMP/release.keystore" \
-            --ks-key-alias "$KS_ALIAS" \
-            --ks-pass env:KS_PASS \
-            --key-pass env:KS_PASS \
-            --out "$RUNNER_TEMP/KaraokeNatin-arm64-release.apk" \
-            "$RUNNER_TEMP/aligned.apk"
-          "$BUILD_TOOLS/apksigner" verify --verbose "$RUNNER_TEMP/KaraokeNatin-arm64-release.apk"
-
-          mkdir -p dist-release
-          cp "$RUNNER_TEMP/KaraokeNatin-arm64-release.apk" dist-release/
-          # Do not leave the keystore on disk for later steps to pick up.
-          rm -f "$RUNNER_TEMP/release.keystore"
-
-      - name: Collect unsigned APK
-        if: steps.signing.outputs.available != 'true'
-        run: |
-          mkdir -p dist-release
-          APK_DIR=apps/host/src-tauri/gen/android/app/build/outputs/apk/arm64/release
-          find "$APK_DIR" -name '*.apk' -exec cp {} dist-release/KaraokeNatin-arm64-release-unsigned.apk \;
-          ls -la dist-release
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: dist-release/*
+          path: apps/host/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
-
-  # ---------------------------------------------------------------------------
-  # Publish
-  # ---------------------------------------------------------------------------
-  release:
-    name: Publish release
-    needs: [desktop, android]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Flatten artifacts
-        run: |
-          mkdir -p release
-          find artifacts -type f -exec cp {} release/ \;
-          ls -la release
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
-          draft: false
-          # A tag build names itself; a manual run needs an explicit name.
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('manual-{0}', github.run_number) }}
