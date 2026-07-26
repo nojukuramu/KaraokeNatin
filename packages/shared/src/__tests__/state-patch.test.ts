@@ -46,10 +46,13 @@ function baseState(): RoomState {
                 addedAt: 0,
             },
         ],
-        playlists: [{ id: 'c1', name: 'Party', visibility: 'public', songs: [], createdAt: 0 }],
+        playlists: [
+            { id: 'c1', name: 'Party', visibility: 'public', songs: [], createdAt: 0, updatedAt: 0 },
+        ],
         connectedClients: [],
+        createdAt: 0,
         updatedAt: 0,
-    } as RoomState;
+    };
 }
 
 describe('STATE_PATCH merge', () => {

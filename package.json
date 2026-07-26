@@ -10,7 +10,7 @@
         "dev:host": "pnpm run build:shared && cd apps/host && pnpm run tauri:dev",
         "build:host": "pnpm run build:shared && cd apps/host && pnpm run build && pnpm run tauri build",
         "build": "pnpm run build:host",
-        "typecheck": "pnpm run build:shared && cd apps/host && npx tsc --noEmit",
+        "typecheck": "pnpm run build:shared && cd packages/shared && npx tsc --noEmit -p tsconfig.test.json && cd ../../apps/host && npx tsc --noEmit",
         "test": "vitest run",
         "test:watch": "vitest",
         "lint:rust": "cd apps/host/src-tauri && cargo clippy --all-targets",

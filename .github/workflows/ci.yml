@@ -32,6 +32,8 @@ jobs:
 
       # Builds packages/shared first — apps/host imports it by package main,
       # so a missing dist/ fails typecheck rather than anything more obvious.
+      # Also typechecks the test files, which are excluded from the build
+      # config so they do not ship in dist/.
       - name: Typecheck
         run: pnpm run typecheck
 
