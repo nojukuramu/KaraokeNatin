@@ -274,7 +274,20 @@ pub async fn on_connect(socket: SocketRef, _state: State<RoomManager>) {
                         let _ = socket.to(host_socket_id).emit("CLIENT_JOINED", ClientJoinedPayload {
                             client_id: socket.id.to_string(),
                             display_name: data.display_name,
-                            peer_id: socket.id.to_string(), // Using socket ID as temp peer ID
+                            // The guest's real PeerJS id does not exist yet at this point in
+                            // the handshake: `remote-ui/index.html` only constructs its `Peer`
+                            // object (and receives an id from the embedded broker) *after*
+                            // JOIN_SUCCESS hands it the host's peer id — see `initPeer()` /
+                            // `peer.on('open', ...)` there. So JOIN_ROOM cannot carry it, and
+                            // this field is filled with the socket.io id as a placeholder.
+                            // In practice this is harmless: the host never reads
+                            // `CLIENT_JOINED.peerId` (grep confirms no consumer in
+                            // apps/host/src), because it identifies connected guests by
+                            // `conn.peer` from the actual WebRTC DataConnection instead
+                            // (`usePeerHost.ts`). If a real consumer of this field is ever
+                            // added, it will need the guest to report its peer id in a
+                            // follow-up message after `Peer` finishes opening, not here.
+                            peer_id: socket.id.to_string(),
                         });
 
                         // Confirm to client
