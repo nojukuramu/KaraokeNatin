@@ -149,10 +149,10 @@ Ordering matters here; see O-"Suggested sequence".
 - [x] **T27 — Fix list keys.** *(I-4.6, O-6)* — **S**
   Index keys on lists that reorder by design break reconciliation and lose D-pad focus. Songs have stable `id`s. *Prerequisite for T28/T29 doing what they claim.*
 
-- [~] **T28 — Virtualize playlist and queue lists.** *(Library done; TV surfaces deliberately not)* *(I-3.8, O-2)* — **L**
+- [~] **T28 — Virtualize playlist and queue lists.** *(Library virtualized; TV surfaces deliberately not)* *(I-3.8, O-2)* — **L**
   `ControlPanel.tsx:794`, `Library.tsx:504`, `Queue.tsx:107` render every row unvirtualized. Largest rendering cost in the app, worst on the Android TV target.
-  *Complication: virtualized rows unmount, so spatial-navigation focus registration must be reconciled with windowing. Answer to Q3 changes how hard this is.*
-  *Cheap partial win if deferred: `loading="lazy"` + explicit dimensions on thumbnails.*
+  **What closing this actually requires** (established by attempting it): per-row `useFocusable` registration has to be replaced with a list-level focus manager — intercept arrow keys at the list container, track a manual `focusedIndex`, drive `scrollToItem` programmatically, and re-derive which of the several buttons within a row is targeted. That is a redesign of the focus model, not a windowing add-on. Scoped as its own task before anyone starts.
+  *Cheap partial win, already applied: `loading="lazy"`, `decoding="async"` and explicit dimensions on all three thumbnail sites.*
 
 - [x] **T29 — Memoize the ControlPanel render path.** *(O-5)* — **M**
   All handlers wrapped in `useCallback`; the search-result row and playlist-row JSX extracted into `SearchResultRow`/`PlaylistSongRow`, both wrapped in `React.memo`; the six parallel `Set` states consolidated into one `useReducer` (`addStatusReducer.ts`, unit-tested in `__tests__/addStatusReducer.test.ts`). `FocusableButton` also wrapped in `React.memo`. Net effect: typing in the search box or ticking player state no longer re-renders rows whose own props are unchanged.
