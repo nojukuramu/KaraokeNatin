@@ -22,6 +22,7 @@
 | `ISSUES.md` | Known defects with severity |
 | `OPTIMIZATION.md` | Improvement candidates, ranked |
 | `task.md` | The actionable backlog |
+| `docs/RELEASING.md` | How releases are built and signed |
 | `REPO_NOTES.md` | Audit reasoning, assumptions, open questions |
 
 The READMEs, `QUICK_START.md`, `DEPLOYMENT.md`, and `RUN_INSTRUCTIONS.md` describe an architecture the project has moved off. Treat their claims as hypotheses to check against code.

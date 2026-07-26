@@ -1,5 +1,10 @@
 # Deployment
 
+> **Building releases is automated.** Pushing a `v*` tag builds Windows,
+> Linux and Android artifacts and publishes a GitHub Release. See
+> [docs/RELEASING.md](docs/RELEASING.md). The manual steps below are for
+> local builds and for understanding what the workflow does.
+
 ## What ships
 
 **One artifact: the host application.** Guests install nothing — they scan a QR code and the host serves them the remote UI from its own embedded web server.
