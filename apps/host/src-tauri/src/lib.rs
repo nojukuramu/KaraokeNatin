@@ -6,6 +6,7 @@ mod metadata;
 mod network;
 mod web_server;
 mod youtube;
+pub mod peer_server;
 mod signaling;
 
 use room_state::{RoomStateManager, PlaylistStore};

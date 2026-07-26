@@ -1,9 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  KaraokeNatin is a LAN app. The host binds 0.0.0.0 on a random port and guests
+  reach it over plain HTTP at a LAN IP discovered at runtime
+  (src-tauri/src/network.rs::generate_qr_url -> "http://<local ip>:<port>", the
+  URL behind the QR code). In Guest mode this app is the client for exactly that
+  kind of URL, so cleartext to private addresses is load-bearing, not incidental.
+
+  WHAT CHANGED, AND WHAT DELIBERATELY DID NOT:
+
+  Removed: the <certificates src="user" /> trust anchor. Trusting user-installed
+  CAs app-wide widened the MITM surface and nothing here needed it. That is a
+  real, free improvement and it stays removed.
+
+  Kept: cleartextTrafficPermitted="true" on base-config. This is not an oversight.
+
+  Android's Network Security Config <domain> element matches only exact literal
+  hostnames or IP addresses. There is no CIDR, range, or wildcard syntax, and
+  includeSubdomains is explicitly ignored for raw IP literals. The addresses this
+  app must reach are 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 — millions of
+  addresses, with the specific one known only at runtime. They cannot be
+  enumerated here.
+
+  An earlier revision of this file set base-config to
+  cleartextTrafficPermitted="false" and allow-listed only loopback. That is
+  tighter, and it also breaks the product: every real guest-to-host connection
+  is cleartext to a LAN IP, so Guest mode would fail on every device. Shipping an
+  app that cannot perform its one function is not a security improvement, so the
+  permissive base-config is retained knowingly.
+
+  Do not "tighten" this back to false without first moving LAN traffic off
+  cleartext. The real fixes, in rough order of effort:
+    - Serve the host over HTTPS with a self-signed cert and pin it in the client.
+    - Validate at the call site (Rust/Kotlin) that the destination is an
+      RFC1918 or loopback address before issuing a cleartext request.
+  Either would let this file deny cleartext by default and mean it.
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
+            <!-- System CAs only. User-installed CAs are deliberately not trusted. -->
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>

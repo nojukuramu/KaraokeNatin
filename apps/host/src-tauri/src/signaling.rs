@@ -24,6 +24,22 @@ pub struct RoomManager {
     socket_rooms: Arc<RwLock<HashMap<String, String>>>,
 }
 
+/// Compare two byte strings without short-circuiting on the first difference.
+///
+/// Token hashes are compared on every join attempt; a plain `!=` leaks how many
+/// leading bytes matched via timing. The length check is not secret (both sides
+/// are fixed-width hex SHA-256).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 impl RoomManager {
     pub fn new() -> Self {
         Self {
@@ -66,7 +82,7 @@ impl RoomManager {
         let room = self.get_room(room_id).ok_or("Room not found")?;
 
         let token_hash = hash_token(join_token);
-        if token_hash != room.join_token_hash {
+        if !constant_time_eq(token_hash.as_bytes(), room.join_token_hash.as_bytes()) {
             return Err("Invalid token".to_string());
         }
 
@@ -232,12 +248,17 @@ pub async fn on_connect(socket: SocketRef, _state: State<RoomManager>) {
 
         match target_room_id {
             Some(room_id) => {
-                let room_res = if data.room_id.as_deref().unwrap_or("") == "default" || data.room_id.as_deref().unwrap_or("").is_empty() {
-                    // Start mode - just get the room if it exists (we already got ID)
-                    state.get_room(&room_id).ok_or("Room not found".to_string())
-                } else {
-                    state.verify_room(&room_id, &data.join_token)
-                };
+                // Always verify the join token.
+                //
+                // This previously skipped verification whenever room_id was
+                // empty or "default", which is exactly what the QR-code guest
+                // client sent — so the token was never actually checked and any
+                // device on the LAN could join. Room *resolution* still falls
+                // back to the first active room (a guest scanning the QR does
+                // not know the room id), but resolution and authorisation are
+                // now separate: you may be pointed at the room without being
+                // let into it.
+                let room_res = state.verify_room(&room_id, &data.join_token);
 
                 match room_res {
                     Ok(room) => {
@@ -299,4 +320,92 @@ pub async fn on_connect(socket: SocketRef, _state: State<RoomManager>) {
              state.remove_socket_room(&socket.id.to_string());
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "correct-horse-battery-staple";
+
+    fn manager_with_room() -> RoomManager {
+        let mgr = RoomManager::new();
+        mgr.create_room(
+            "room-1".to_string(),
+            "host-socket".to_string(),
+            hash_token(TOKEN),
+            Some("host-peer".to_string()),
+        )
+        .expect("room creation should succeed");
+        mgr
+    }
+
+    #[test]
+    fn constant_time_eq_matches_plain_comparison() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+        assert!(!constant_time_eq(b"", b"a"));
+        assert!(constant_time_eq(b"", b""));
+        // Differing only in the final byte must still fail; a short-circuiting
+        // comparison would too, but this pins the behaviour.
+        assert!(!constant_time_eq(b"aaaaaaaaaa", b"aaaaaaaaab"));
+    }
+
+    #[test]
+    fn verify_room_accepts_the_correct_token() {
+        let mgr = manager_with_room();
+        assert!(mgr.verify_room("room-1", TOKEN).is_ok());
+    }
+
+    #[test]
+    fn verify_room_rejects_a_wrong_token() {
+        let mgr = manager_with_room();
+        assert!(mgr.verify_room("room-1", "wrong").is_err());
+    }
+
+    /// The regression this whole change exists for: JOIN_ROOM used to skip
+    /// verification when the client sent an empty token, and the shipped guest
+    /// UI sent exactly that. An empty token must now be rejected like any other
+    /// wrong token.
+    #[test]
+    fn verify_room_rejects_an_empty_token() {
+        let mgr = manager_with_room();
+        assert!(mgr.verify_room("room-1", "").is_err());
+    }
+
+    #[test]
+    fn verify_room_rejects_an_unknown_room() {
+        let mgr = manager_with_room();
+        assert!(mgr.verify_room("no-such-room", TOKEN).is_err());
+    }
+
+    #[test]
+    fn verify_room_rejects_a_full_room() {
+        let mgr = manager_with_room();
+        for _ in 0..MAX_CLIENTS_PER_ROOM {
+            mgr.add_client("room-1");
+        }
+        let err = mgr.verify_room("room-1", TOKEN).unwrap_err();
+        assert!(err.contains("full"), "expected a capacity error, got: {err}");
+    }
+
+    #[test]
+    fn get_first_active_room_resolves_without_authorising() {
+        // Resolution and authorisation are deliberately separate: a guest who
+        // scanned the QR does not know the room id, so the server still points
+        // them at the active room — but still demands a valid token.
+        let mgr = manager_with_room();
+        let resolved = mgr.get_first_active_room().expect("a room should resolve");
+        assert_eq!(resolved.room_id, "room-1");
+        assert!(mgr.verify_room(&resolved.room_id, "").is_err());
+    }
+
+    #[test]
+    fn hash_token_is_stable_and_distinct() {
+        assert_eq!(hash_token(TOKEN), hash_token(TOKEN));
+        assert_ne!(hash_token(TOKEN), hash_token("other"));
+        // SHA-256 hex
+        assert_eq!(hash_token(TOKEN).len(), 64);
+    }
 }

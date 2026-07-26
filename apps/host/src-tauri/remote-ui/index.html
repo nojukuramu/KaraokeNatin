@@ -1172,9 +1172,11 @@
             reconnectAttempts: 0,
             maxReconnectAttempts: 5,
             reconnecting: false,
-            reconnecting: false,
             // InApp Remote mode (embedded in Tauri host app)
             isInAppRemote: new URLSearchParams(window.location.search).get('mode') === 'inapp',
+            // Join token from the QR URL (?t=...). The signaling server verifies
+            // this on every JOIN_ROOM, so a guest arriving without it is rejected.
+            joinToken: new URLSearchParams(window.location.search).get('t') || '',
             // Local Library (from Native App)
             localPlaylists: [],
             activeLocalCollectionIdx: 0,
@@ -2146,7 +2148,7 @@
                 console.log('[Remote] Socket connected');
                 socket.emit('JOIN_ROOM', {
                     roomId: 'default',
-                    joinToken: '',
+                    joinToken: state.joinToken,
                     displayName: state.username
                 });
             });
@@ -2226,7 +2228,17 @@
 
             console.log('[Remote] Connecting to host peer:', hostPeerId);
 
+            // Use the PeerJS broker embedded in the host we were served from.
+            // Without host/port/path, PeerJS silently falls back to its public
+            // 0.peerjs.com cloud — which meant this LAN app could not connect a
+            // guest at all without internet access. Same-origin by construction:
+            // this page is served by that very host.
             peer = new Peer({
+                host: window.location.hostname,
+                port: Number(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80),
+                path: '/',
+                key: 'peerjs',
+                secure: window.location.protocol === 'https:',
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },

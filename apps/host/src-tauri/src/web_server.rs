@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use socketioxide::SocketIo;
 use crate::signaling::{RoomManager, on_connect};
+use crate::peer_server::{self, PeerRegistry};
 
 /// The embedded remote control UI HTML
 const REMOTE_UI_HTML: &str = include_str!("../remote-ui/index.html");
@@ -63,11 +64,25 @@ pub async fn start_web_server() -> Result<(), String> {
 
     io.ns("/", on_connect);
 
+    // The embedded PeerJS broker. Without this, clients fall back to the public
+    // 0.peerjs.com cloud and the app cannot connect guests without internet —
+    // see peer_server.rs for the full rationale.
+    let peer_registry = PeerRegistry::new();
+
+    let peer_routes = Router::new()
+        // GET /peerjs upgrades to the relay socket when an Upgrade header is
+        // present; PeerJS also probes /peerjs/id for a server-assigned id.
+        .route("/peerjs", get(peer_server::peer_ws_handler))
+        .route("/peerjs/id", get(peer_server::generate_id))
+        .route("/peerjs/peers", get(peer_server::peers_status))
+        .with_state(peer_registry);
+
     // Create router with timeout and concurrency limits
     let app = Router::new()
         // Serve the remote control UI
         .route("/", get(serve_index))
         .route("/health", get(health_check))
+        .merge(peer_routes)
         .layer(layer) // Socket.io layer
         // Add CORS for local development
         .layer(

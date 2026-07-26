@@ -181,7 +181,10 @@ function GuestView({ onBack }: { onBack: () => void }) {
   const handleGuestConnect = useCallback((hostUrl: string) => {
     const url = new URL(hostUrl);
     url.searchParams.set('mode', 'inapp');
-    url.searchParams.set('t', Date.now().toString()); // Bust WebView cache
+    // Cache-buster. Named `_cb`, not `t`: `t` carries the join token from the
+    // scanned QR URL, and overwriting it with a timestamp would make every
+    // in-app guest connection fail token verification.
+    url.searchParams.set('_cb', Date.now().toString());
     setGuestHostUrl(url.toString());
     setGuestIframeLoaded(false);
     setShowScanner(false);
