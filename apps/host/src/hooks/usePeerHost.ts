@@ -23,6 +23,28 @@ export function usePeerHost() {
         connectionsRef.current = connections;
     }, [connections]);
 
+    // Sweep for channels that went away without firing 'close'. PeerJS does not
+    // reliably emit close when the underlying transport dies (a slept phone, a
+    // dropped access point), so `conn.open` is the only honest signal.
+    useEffect(() => {
+        const REAP_INTERVAL_MS = 15000;
+        const timer = setInterval(() => {
+            const stale: string[] = [];
+            connectionsRef.current.forEach((conn, peerId) => {
+                if (!conn.open) stale.push(peerId);
+            });
+            if (stale.length === 0) return;
+            console.log('[PeerHost] Reaping stale connections:', stale);
+            setConnections((prev) => {
+                const next = new Map(prev);
+                stale.forEach((id) => next.delete(id));
+                return next;
+            });
+        }, REAP_INTERVAL_MS);
+
+        return () => clearInterval(timer);
+    }, []);
+
     // Subscribe to room state updates and broadcast to all connected peers
     useEffect(() => {
         // `room_state_public` is emitted by Rust with personal collections
@@ -168,6 +190,20 @@ export function usePeerHost() {
                 return;
             }
 
+            // PING/PONG existed in the protocol but nothing ever answered a
+            // PING, so guests had no way to tell a live channel from a dead
+            // one. Answer before the generic command path, since PING is a
+            // liveness probe rather than a state mutation.
+            if (msg && msg.type === 'PING') {
+                const pong: HostBroadcast = { type: 'PONG', serverTime: Date.now() };
+                try {
+                    conn.send(pong);
+                } catch (e) {
+                    console.warn('[PeerHost] Failed to answer PING:', e);
+                }
+                return;
+            }
+
             if (isClientCommand(data)) {
                 console.log('[PeerHost] Received command:', data);
                 try {
@@ -188,11 +224,25 @@ export function usePeerHost() {
 
         conn.on('close', () => {
             console.log('[PeerHost] Connection closed:', conn.peer);
-            setConnections((prev) => {
-                const next = new Map(prev);
-                next.delete(conn.peer);
-                return next;
-            });
+            dropConnection(conn.peer);
+        });
+
+        // Without this, a guest whose phone slept or briefly dropped Wi-Fi —
+        // the normal case at a party — stayed in the connection map forever.
+        // Every subsequent broadcast then tried to write to a dead channel and
+        // the client count was permanently wrong.
+        conn.on('error', (err) => {
+            console.warn('[PeerHost] Connection error, dropping peer:', conn.peer, err);
+            dropConnection(conn.peer);
+        });
+    };
+
+    const dropConnection = (peerId: string) => {
+        setConnections((prev) => {
+            if (!prev.has(peerId)) return prev;
+            const next = new Map(prev);
+            next.delete(peerId);
+            return next;
         });
     };
 

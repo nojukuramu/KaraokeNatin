@@ -13,6 +13,12 @@ const Icons = {
             <polyline points="18 15 12 9 6 15"></polyline>
         </svg>
     ),
+    chevronsUp: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="17 11 12 6 7 11"></polyline>
+            <polyline points="17 18 12 13 7 18"></polyline>
+        </svg>
+    ),
     chevronDown: (
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
@@ -74,6 +80,20 @@ const Queue = ({ songs }: QueueProps) => {
         }
     };
 
+    // Bumping a song to the front is the queue operation karaoke actually
+    // wants (someone's turn got skipped, a birthday, etc). MOVE_SONG_TO_TOP
+    // existed in the protocol and the Rust enum with no way to reach it;
+    // repeated "move up" taps were the only workaround.
+    const handleMoveToTop = async (songId: string) => {
+        try {
+            await invoke('process_command', {
+                command: { type: 'MOVE_SONG_TO_TOP', songId },
+            });
+        } catch (error) {
+            console.error('[Queue] Failed to move song to top:', error);
+        }
+    };
+
     const handleRemove = async (songId: string) => {
         try {
             await invoke('process_command', {
@@ -122,6 +142,13 @@ const Queue = ({ songs }: QueueProps) => {
                             </div>
 
                             <div className="queue-actions">
+                                <QueueActionButton
+                                    onClick={() => handleMoveToTop(song.id)}
+                                    disabled={index === 0}
+                                    title="Play next"
+                                >
+                                    {Icons.chevronsUp}
+                                </QueueActionButton>
                                 <QueueActionButton
                                     onClick={() => handleMoveUp(song.id)}
                                     disabled={index === 0}

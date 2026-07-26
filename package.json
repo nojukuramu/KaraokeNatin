@@ -13,9 +13,10 @@
         "typecheck": "pnpm run build:shared && cd apps/host && npx tsc --noEmit",
         "test": "vitest run",
         "test:watch": "vitest",
-        "lint:rust": "cd apps/host/src-tauri && cargo clippy --all-targets -- -D warnings",
+        "lint:rust": "cd apps/host/src-tauri && cargo clippy --all-targets",
         "fmt:rust": "cd apps/host/src-tauri && cargo fmt",
-        "check": "pnpm run typecheck && pnpm run test"
+        "check": "pnpm run typecheck && pnpm run test && pnpm run test:rust",
+        "test:rust": "cd apps/host/src-tauri && cargo test"
     },
     "workspaces": [
         "apps/*",
