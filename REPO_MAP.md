@@ -1,5 +1,12 @@
 # KaraokeNatin — Repository Map
 
+> **Updated after the implementation pass.** The two dead workspaces this map
+> originally documented (`apps/signaling-server`, `apps/web-client`) have since
+> been **deleted**, and a PeerJS broker (`src-tauri/src/peer_server.rs`) was
+> added so the WebRTC handshake stays on the LAN. Sections describing the dead
+> paths are kept below as history — they explain why the tree looked the way it
+> did — but nothing in `apps/` exists now except `host`.
+
 Generated for audit purposes by reading source directly. READMEs, `BUILD_SETUP.md`,
 `DEPLOYMENT.md`, `QUICK_START.md`, and package `README.md` files are **not** used as
 sources of truth here — they describe an older architecture (see "Dead / orphaned
@@ -34,8 +41,8 @@ pnpm workspace root: `/home/user/KaraokeNatin/package.json:1`, member globs
 |---|---|---|---|
 | `@karaokenatin/host` | `apps/host` | Tauri 2 app: React+TS frontend (`src/`) + Rust backend (`src-tauri/`) | **LIVE** — the shipped product |
 | `@karaokenatin/shared` | `packages/shared` | TS-only package of protocol/state types | **LIVE** — used by `host`, `signaling-server`, and `web-client` |
-| `@karaokenatin/signaling-server` | `apps/signaling-server` | Node + socket.io signaling server, TS | **DEAD** — never launched by the host; superseded by Rust `signaling.rs` |
-| `@karaokenatin/web-client` | `apps/web-client` | Next.js 14 remote-control web app | **ORPHANED** — not built/bundled/served; superseded by `remote-ui/index.html` |
+| ~~`@karaokenatin/signaling-server`~~ | *(deleted)* | Node + socket.io signaling server | **REMOVED** — was never launched by the host; Rust `signaling.rs` is and always was the live path |
+| ~~`@karaokenatin/web-client`~~ | *(deleted)* | Next.js 14 remote-control web app | **REMOVED** — was never built/bundled/served; `remote-ui/index.html` is the guest client |
 
 ## Runtime architecture
 
@@ -140,7 +147,8 @@ server on `localhost:5173` (`apps/host/src-tauri/tauri.conf.json:8`).
 | `room_state.rs` | 702 | `PlaylistStore` (persisted collections, JSON to disk) + `RoomState`/`RoomStateManager` (in-memory player+queue, `parking_lot::RwLock`) |
 | `signaling.rs` | 302 | `RoomManager` — in-memory room/token registry for the embedded socketioxide server (`CREATE_ROOM`/`JOIN_ROOM`/disconnect handling) |
 | `web_server.rs` | 139 | axum HTTP server: binds `0.0.0.0` on a random port in `49152..=65535` (`web_server.rs:39`, fallback to OS-assigned `web_server.rs:47`), serves `remote-ui/index.html` at `/`, `/health`, and mounts the socketioxide layer |
-| `youtube.rs` | 151 | `search_youtube()` via `rusty_ytdl::search::YouTube`, with a 30-minute in-memory `SEARCH_CACHE` (`youtube.rs:21,37`) |
+| `youtube.rs` | 151 | `search_youtube()` via `rusty_ytdl::search::YouTube`, with a size-capped, TTL'd in-memory `SEARCH_CACHE` |
+| `peer_server.rs` | ~300 | **Added.** PeerJS-compatible signaling broker mounted at `/peerjs`, so the WebRTC handshake never leaves the LAN. Previously all clients fell back to the public `0.peerjs.com` cloud. |
 | `metadata.rs` | 73 | `fetch_metadata()` via `rusty_ytdl::Video::get_info()`, with a 10s timeout and graceful fallback metadata on failure/timeout |
 | `network.rs` | 35 | `get_local_ip()` (via `local-ip-address` crate) and `generate_qr_url()` = `http://<ip>:<port>` |
 | `main.rs` | 6 | Binary entry point, calls `app_lib::run()` |

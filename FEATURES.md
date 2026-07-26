@@ -1,5 +1,11 @@
 # KaraokeNatin — Feature Inventory (Audit)
 
+> **Updated after the implementation pass.** Notable changes since this was
+> written: scoring is no longer fake (it measures mic input coverage); volume,
+> mute, seek and "play next" now have UI; `HelpDialog` is reachable; the three
+> missing Tauri commands are implemented or removed; and `apps/web-client` has
+> been deleted. Individual entries below are annotated where they changed.
+
 Scope: `apps/host` (the Tauri desktop/Android app — this is "the app"). Compiled by reading source directly; READMEs were not used as a source of truth. Line numbers are current as of this audit and will drift as the code changes — treat them as pointers, not permanent anchors.
 
 Two GUI surfaces exist for the same backend:
@@ -26,13 +32,14 @@ Logic layer = Rust (`apps/host/src-tauri/src/*.rs`) plus the shared TS protocol 
 | Queue: view | Yes | Yes (Playing tab + dead Queue tab) | N/A |
 | Queue: move up/down | Yes | Yes | N/A |
 | Queue: remove | Yes | Yes | N/A |
-| Queue: move to top/bottom, reorder-to-index | Backend only, no UI | Backend only, no UI | N/A |
+| Queue: move to top ("play next") | **Yes** | Backend only, no UI | N/A |
+| Queue: move to bottom, reorder-to-index | Backend only, no UI | Backend only, no UI | N/A |
 | Playback: play/pause | Yes | Yes | N/A |
 | Playback: skip | Yes | Yes | N/A |
-| Playback: seek | Backend only, no UI | Backend only, no UI | N/A |
-| Playback: volume / mute | Backend only, no UI | Backend only, no UI | N/A |
+| Playback: seek | **Yes** (seek bar) | Backend only, no UI | N/A |
+| Playback: volume / mute | **Yes** (slider + mute) | Backend only, no UI | N/A |
 | Fullscreen toggle | Yes (Player) | N/A (no video element) | N/A |
-| Scoring overlay (FAKE — `Math.random()`) | Yes | N/A | N/A |
+| Scoring overlay (mic input coverage) | Yes | N/A | N/A |
 | Playlist collections: create/rename/delete | Yes | No (create-only via search picker's implicit flow is host-only) | Yes |
 | Playlist collections: set public/personal visibility | Yes | View-only (icon) | Yes |
 | Playlist collections: add/remove song | Yes | Yes (add via queue/search; remove yes) | Yes |
@@ -44,8 +51,8 @@ Logic layer = Rust (`apps/host/src-tauri/src/*.rs`) plus the shared TS protocol 
 | Android TV / D-pad spatial navigation | Yes | No (phone-oriented UI) | No |
 | Mobile responsive tab bar (Player/Controls) | Yes | N/A (already mobile-first) | N/A |
 | Connected-clients count | Yes | No | N/A |
-| Help dialog (logs / report issue) | Orphaned — component exists, never rendered | N/A | N/A |
-| `fetch_song_metadata` command | Called by dead `commands.ts` wrapper only | N/A | N/A |
+| Help dialog (logs / report issue) | **Yes** — reachable from the mode-select screen | N/A | N/A |
+| ~~`fetch_song_metadata`~~ | Removed — the command never existed and nothing called it | N/A | N/A |
 
 ---
 
