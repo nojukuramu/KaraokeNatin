@@ -154,10 +154,9 @@ Ordering matters here; see O-"Suggested sequence".
   *Complication: virtualized rows unmount, so spatial-navigation focus registration must be reconciled with windowing. Answer to Q3 changes how hard this is.*
   *Cheap partial win if deferred: `loading="lazy"` + explicit dimensions on thumbnails.*
 
-- [~] **T29 — Memoize the ControlPanel render path.** *(reducer + tests landed; wiring pending)* *(O-5)* — **M**
-  `addStatusReducer.ts` consolidates the six parallel `Set` states and is unit-tested, but is not yet imported by `ControlPanel.tsx`. An attempt at the full migration (memoized row components + `useCallback` handlers) was left in a non-compiling state and reverted rather than committed; redo it as one complete change.
-  829 lines, 17 `useState`, inline handlers so every child prop is a fresh reference. Consolidate the six parallel `Set` states into a reducer.
-  *Do after T28 — memoizing a component whose cost is 300 unvirtualized rows moves little.*
+- [x] **T29 — Memoize the ControlPanel render path.** *(O-5)* — **M**
+  All handlers wrapped in `useCallback`; the search-result row and playlist-row JSX extracted into `SearchResultRow`/`PlaylistSongRow`, both wrapped in `React.memo`; the six parallel `Set` states consolidated into one `useReducer` (`addStatusReducer.ts`, unit-tested in `__tests__/addStatusReducer.test.ts`). `FocusableButton` also wrapped in `React.memo`. Net effect: typing in the search box or ticking player state no longer re-renders rows whose own props are unchanged.
+  *Known limitation:* `newCollectionName`/`newLibraryCollectionName` (the inline "create collection" form inside a result's picker) are still passed to every `SearchResultRow`, so typing there re-renders all rows, not just the open one — a minor cost given search results are capped (~10-20), left as-is rather than moving picker state into per-row local state.
 
 - [~] **T30 — Replace full-state broadcast with `STATE_PATCH`.** *(I-3.5, O-1)* — **L**
   **Done for the case that dominates traffic.** Player progress ticks (~every 5s) now send `STATE_PATCH` with the `player` subtree instead of the whole room. `player` is self-contained, so replacing it wholesale cannot desync anything else — which is why this needed no sequence numbers. 8 tests pin the merge contract.
