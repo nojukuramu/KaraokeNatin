@@ -264,13 +264,13 @@ export default function Library({ onBack }: LibraryProps) {
                     <div className="library-section">
                         <div className="section-label">Search Results</div>
                         <div className="search-results">
-                            {searchResults.map((result, i) => {
+                            {searchResults.map((result) => {
                                 const isLoading = addingToLibrary.has(result.url);
                                 const isAdded = addedToLibrary.has(result.url);
 
                                 return (
-                                    <div key={i} className="search-result-item">
-                                        <img src={result.thumbnail} alt="" className="search-result-thumb" />
+                                    <div key={result.url} className="search-result-item">
+                                        <img src={result.thumbnail} alt="" loading="lazy" decoding="async" className="search-result-thumb" />
                                         <div className="search-result-info">
                                             <div className="search-result-title">{result.title}</div>
                                             <div className="search-result-meta">
@@ -504,7 +504,7 @@ export default function Library({ onBack }: LibraryProps) {
                             {activeCollection.songs.map((song, i) => (
                                 <div key={song.id} className="playlist-item">
                                     <span className="playlist-number">{i + 1}</span>
-                                    <img src={song.thumbnailUrl} alt="" className="playlist-thumb" />
+                                    <img src={song.thumbnailUrl} alt="" loading="lazy" decoding="async" className="playlist-thumb" />
                                     <div className="playlist-info">
                                         <div className="playlist-title">{song.title}</div>
                                     </div>

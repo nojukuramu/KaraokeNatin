@@ -162,6 +162,10 @@ function HostView({ onBack }: { onBack: () => void }) {
             onAddToPlaylist={handleAddToPlaylist}
             isPlaying={roomState?.player.status === 'playing'}
             currentSong={roomState?.player.currentSong || null}
+            volume={roomState?.player.volume}
+            isMuted={roomState?.player.isMuted}
+            currentTime={roomState?.player.currentTime}
+            duration={roomState?.player.duration}
             isMobile={isMobile}
             onBack={onBack}
           />

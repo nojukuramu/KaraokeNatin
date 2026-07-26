@@ -1823,3 +1823,86 @@ body {
 .help-fab:focus-visible {
     box-shadow: 0 0 0 3px var(--accent, #6c5ce7);
 }
+
+/* ---- Transport: seek + volume ----
+   Range inputs are styled for both pointer and D-pad use: a 44px-tall hit area
+   for touch, and a visible focus ring since spatial navigation moves focus
+   without a cursor to follow. */
+.player-seek-row,
+.player-volume-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.player-time,
+.player-volume-value {
+    font-size: 0.75rem;
+    color: var(--text-muted, #9a9aae);
+    font-variant-numeric: tabular-nums;
+    min-width: 3.2em;
+}
+
+.player-time:last-of-type,
+.player-volume-value {
+    text-align: right;
+}
+
+.player-volume-icon {
+    color: var(--text-muted, #9a9aae);
+    flex-shrink: 0;
+}
+
+.player-seek,
+.player-volume {
+    flex: 1;
+    min-width: 0;
+    height: 44px;              /* touch target; the visible track is drawn thin */
+    background: transparent;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.player-seek::-webkit-slider-runnable-track,
+.player-volume::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border, rgba(255, 255, 255, 0.18));
+}
+
+.player-seek::-moz-range-track,
+.player-volume::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border, rgba(255, 255, 255, 0.18));
+}
+
+.player-seek::-webkit-slider-thumb,
+.player-volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, #6c5ce7);
+}
+
+.player-seek::-moz-range-thumb,
+.player-volume::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent, #6c5ce7);
+}
+
+.player-seek:focus-visible,
+.player-volume:focus-visible {
+    outline: 2px solid var(--accent, #6c5ce7);
+    outline-offset: 2px;
+    border-radius: 4px;
+}

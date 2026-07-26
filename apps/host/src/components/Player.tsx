@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRoomState } from '../hooks/useRoomState';
 import { useMicCoverage, coverageToScore } from '../hooks/useMicCoverage';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { invoke } from '@tauri-apps/api/core';
 import { useFocusable, FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import ScoringOverlay from './ScoringOverlay';
@@ -21,6 +22,13 @@ interface YouTubePlayer {
     getCurrentTime(): number;
     getDuration(): number;
     getPlayerState(): number;
+    // Transport controls driven by SET_VOLUME / TOGGLE_MUTE / SEEK.
+    setVolume(volume: number): void;
+    getVolume(): number;
+    mute(): void;
+    unMute(): void;
+    isMuted(): boolean;
+    seekTo(seconds: number, allowSeekAhead: boolean): void;
     destroy(): void;
 }
 
@@ -74,6 +82,11 @@ const Player = () => {
     const ytPlayerRef = useRef<YouTubePlayer | null>(null);
     const timePollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const { roomState } = useRoomState();
+
+    // Keep the display awake while a song is playing. The host is typically
+    // unattended on a TV, so letting the screen sleep mid-song is a real
+    // failure rather than a nicety.
+    useWakeLock(roomState?.player.status === 'playing');
     const [isAPIReady, setIsAPIReady] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const currentSongRef = useRef(roomState?.player.currentSong);
@@ -378,6 +391,58 @@ const Player = () => {
             ytPlayerRef.current.pauseVideo();
         }
     }, [roomState?.player.status]);
+
+    // Apply volume and mute from room state.
+    //
+    // SET_VOLUME and TOGGLE_MUTE already updated RoomState in Rust, but nothing
+    // ever pushed those values into the YouTube player, so the commands were
+    // inert end to end. This is the half that makes them audible.
+    const volume = roomState?.player.volume;
+    const isMuted = roomState?.player.isMuted;
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || volume === undefined) return;
+        try {
+            player.setVolume(Math.max(0, Math.min(100, volume)));
+        } catch (e) {
+            console.warn('[Player] setVolume failed:', e);
+        }
+    }, [volume, isAPIReady]);
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || isMuted === undefined) return;
+        try {
+            if (isMuted) player.mute();
+            else player.unMute();
+        } catch (e) {
+            console.warn('[Player] mute toggle failed:', e);
+        }
+    }, [isMuted, isAPIReady]);
+
+    // Apply externally requested seeks.
+    //
+    // currentTime is bidirectional: the player reports progress into it every
+    // second, and SEEK writes into it. Reacting to every change would fight our
+    // own reporting, so only a divergence larger than normal playback drift is
+    // treated as a real seek request.
+    const stateTime = roomState?.player.currentTime;
+    const SEEK_EPSILON_SECONDS = 2.5;
+
+    useEffect(() => {
+        const player = ytPlayerRef.current;
+        if (!player || stateTime === undefined) return;
+        try {
+            const actual = player.getCurrentTime?.();
+            if (typeof actual !== 'number') return;
+            if (Math.abs(actual - stateTime) > SEEK_EPSILON_SECONDS) {
+                player.seekTo(stateTime, true);
+            }
+        } catch (e) {
+            console.warn('[Player] seek failed:', e);
+        }
+    }, [stateTime]);
 
     const currentSong = roomState?.player.currentSong;
 

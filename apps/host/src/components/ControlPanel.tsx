@@ -10,6 +10,7 @@ import {
     ChevronLeft, ChevronRight, Users, Search, Plus, Sun, Moon,
     Play, Pause, SkipForward, Music, Trash2, UserPlus,
     Globe, Lock, Pencil, Upload, Download, ChevronDown, ArrowLeft, Star,
+    Volume2, VolumeX,
 } from 'lucide-react';
 
 interface SearchResult {
@@ -34,8 +35,22 @@ interface ControlPanelProps {
     onAddToPlaylist: (url: string, collectionId: string) => Promise<void>;
     isPlaying: boolean;
     currentSong: Song | null;
+    /** Live player state, used by the transport controls. */
+    volume?: number;
+    isMuted?: boolean;
+    currentTime?: number;
+    duration?: number;
     isMobile?: boolean;
     onBack?: () => void;
+}
+
+/** mm:ss for the seek bar. Hours are not worth handling for karaoke tracks. */
+export function formatClock(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+    const total = Math.floor(seconds);
+    const m = Math.floor(total / 60);
+    const sec = total % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
 /** Focusable button wrapper for DPAD navigation */
@@ -79,6 +94,10 @@ const ControlPanel = ({
     onAddToPlaylist,
     isPlaying,
     currentSong,
+    volume = 80,
+    isMuted = false,
+    currentTime = 0,
+    duration = 0,
     isMobile,
     onBack,
 }: ControlPanelProps) => {
@@ -165,6 +184,19 @@ const ControlPanel = ({
         }
     };
 
+    // Sliders need to feel responsive, but authoritative state arrives
+    // asynchronously from Rust. Track the in-flight value locally and drop it
+    // once the real state catches up.
+    const [pendingVolume, setPendingVolume] = useState<number | null>(null);
+    const [pendingSeek, setPendingSeek] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (pendingVolume !== null && pendingVolume === volume) setPendingVolume(null);
+    }, [volume, pendingVolume]);
+
+    const shownVolume = pendingVolume ?? volume;
+    const shownTime = pendingSeek ?? currentTime;
+
     const toggleTheme = () => {
         const newTheme = theme === 'dark' ? 'light' : 'dark';
         setTheme(newTheme);
@@ -188,6 +220,39 @@ const ControlPanel = ({
             });
         } catch (error) {
             console.error('[ControlPanel] Skip failed:', error);
+        }
+    };
+
+    // SET_VOLUME / TOGGLE_MUTE / SEEK have existed end to end in the protocol
+    // and the Rust command enum since the start, with no UI to reach them.
+    const handleVolumeChange = async (next: number) => {
+        const clamped = Math.max(0, Math.min(100, Math.round(next)));
+        setPendingVolume(clamped);
+        try {
+            await invoke('process_command', {
+                command: { type: 'SET_VOLUME', volume: clamped },
+            });
+        } catch (error) {
+            console.error('[ControlPanel] Volume change failed:', error);
+        }
+    };
+
+    const handleToggleMute = async () => {
+        try {
+            await invoke('process_command', { command: { type: 'TOGGLE_MUTE' } });
+        } catch (error) {
+            console.error('[ControlPanel] Mute toggle failed:', error);
+        }
+    };
+
+    const handleSeek = async (seconds: number) => {
+        setPendingSeek(null);
+        try {
+            await invoke('process_command', {
+                command: { type: 'SEEK', time: Math.max(0, seconds) },
+            });
+        } catch (error) {
+            console.error('[ControlPanel] Seek failed:', error);
         }
     };
 
@@ -447,6 +512,57 @@ const ControlPanel = ({
                             >
                                 <SkipForward size={20} />
                             </FocusableButton>
+                            <FocusableButton
+                                className="btn-icon"
+                                onClick={handleToggleMute}
+                                title={isMuted ? 'Unmute' : 'Mute'}
+                            >
+                                {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                            </FocusableButton>
+                        </div>
+
+                        {/* Seek bar. Hidden with no song loaded, since seeking
+                            nothing is meaningless and the control would just
+                            absorb D-pad focus. */}
+                        {currentSong && duration > 0 && (
+                            <div className="player-seek-row">
+                                <span className="player-time">{formatClock(shownTime)}</span>
+                                <input
+                                    type="range"
+                                    className="player-seek"
+                                    min={0}
+                                    max={Math.max(1, Math.floor(duration))}
+                                    value={Math.min(shownTime, duration)}
+                                    aria-label="Seek"
+                                    onChange={(e) => setPendingSeek(Number(e.target.value))}
+                                    onMouseUp={(e) => handleSeek(Number((e.target as HTMLInputElement).value))}
+                                    onTouchEnd={(e) => handleSeek(Number((e.target as HTMLInputElement).value))}
+                                    onKeyUp={(e) => {
+                                        // D-pad / arrow keys commit on release.
+                                        if (e.key.startsWith('Arrow')) {
+                                            handleSeek(Number((e.target as HTMLInputElement).value));
+                                        }
+                                    }}
+                                />
+                                <span className="player-time">{formatClock(duration)}</span>
+                            </div>
+                        )}
+
+                        <div className="player-volume-row">
+                            <Volume2 size={16} className="player-volume-icon" />
+                            <input
+                                type="range"
+                                className="player-volume"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={isMuted ? 0 : shownVolume}
+                                aria-label="Volume"
+                                onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                            />
+                            <span className="player-volume-value">
+                                {isMuted ? 'Muted' : `${shownVolume}%`}
+                            </span>
                         </div>
                     </div>
 
@@ -498,7 +614,7 @@ const ControlPanel = ({
 
                         {!searching && searchResults.length > 0 && (
                             <div className="search-results">
-                                {searchResults.map((result, i) => {
+                                {searchResults.map((result) => {
                                     const isQueueLoading = addingToQueue.has(result.url);
                                     const isQueueAdded = addedToQueue.has(result.url);
                                     const isPlaylistLoading = addingToPlaylist.has(result.url);
@@ -507,10 +623,12 @@ const ControlPanel = ({
                                     const isLibraryAdded = addedToLibrary.has(result.url);
 
                                     return (
-                                        <div key={i} className="search-result-item">
+                                        <div key={result.url} className="search-result-item">
                                             <img
                                                 src={result.thumbnail}
                                                 alt=""
+                                                loading="lazy"
+                                                decoding="async"
                                                 className="search-result-thumb"
                                             />
                                             <div className="search-result-info">
@@ -797,6 +915,8 @@ const ControlPanel = ({
                                         <img
                                             src={song.thumbnailUrl}
                                             alt=""
+                                            loading="lazy"
+                                            decoding="async"
                                             className="playlist-thumb"
                                         />
                                         <div className="playlist-info">
