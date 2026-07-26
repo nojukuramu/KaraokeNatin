@@ -2,12 +2,14 @@
 
 Derived from `ISSUES.md` and `OPTIMIZATION.md`. Every item cross-references its source so the reasoning stays one hop away (`I-x.y` = ISSUES, `O-n` = OPTIMIZATION).
 
-**Status legend:** `[ ]` todo · `[~]` in progress · `[x]` done · `[?]` blocked on a decision
+**Status legend:** `[ ]` todo · `[~]` partially done · `[x]` done · `[-]` skipped (needs hardware) · `[?]` blocked on a decision
 
 **Effort:** S = under an hour · M = half a day · L = multi-day · XL = a week+
 These are rough. Anything marked **unverified** needs a reproduction step before its estimate means anything.
 
-**Ground rule:** Phase 0 comes first. Several later estimates are wrong if Phase 0's findings differ from the static analysis.
+**Ground rule:** Phase 0 comes first. Items marked `[-]` are skipped because they require physical hardware this environment does not have; in both cases the corresponding fix was implemented and unit-tested regardless.
+
+**Ground rule (original):** Phase 0 comes first. Several later estimates are wrong if Phase 0's findings differ from the static analysis.
 
 ---
 
@@ -15,10 +17,10 @@ These are rough. Anything marked **unverified** needs a reproduction step before
 
 Four claims drive most of this backlog and none were confirmed on running hardware. Doing these first is cheap and can reorder everything below.
 
-- [ ] **V1 — Confirm the offline failure.** Run the host with the network unplugged, try to connect a phone on the LAN. Expected: guest cannot connect at all. *(I-2.5, gates T1)* — **S**
+- [-] **V1 — Confirm the offline failure.** *(SKIPPED — needs hardware.)* The fix (T1) landed anyway and is covered by six integration tests that relay a real handshake through the embedded broker. Worth running once on real hardware to confirm end-to-end, but not a blocker: the code path no longer contacts `peerjs.com` at all.
 - [x] **V2 — Confirm the clean-clone build failure.** `git clone` to a fresh directory, `pnpm run setup && pnpm run build:host`. Expected: `tsc` fails on `@karaokenatin/shared`. *(I-1.3, gates T4)* — **S**
 - [x] **V3 — Confirm the auth bypass.** Connect a socket.io client sending `JOIN_ROOM {roomId: "", joinToken: ""}`. Expected: join succeeds. *(I-2.1, gates T5)* — **S**
-- [ ] **V4 — Confirm the Android file-dialog panic.** Trigger collection export on a physical Android device. Expected: panic on `as_path().unwrap()`. *(I-3.9, gates T13)* — **M**, needs a device
+- [-] **V4 — Confirm the Android file-dialog panic.** *(SKIPPED — needs a physical device.)* The fix (T13) landed anyway: both dialog paths now handle `FilePath::Url` and return an error instead of panicking, with a unit test covering the content-URI variant. Confirm on-device when one is available.
 
 ---
 
