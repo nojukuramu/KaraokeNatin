@@ -40,6 +40,18 @@ Check the [Releases](https://github.com/nojukuramu/KaraokeNatin/releases) page f
 ### Build from Source
 See [Building](#-building-from-source) below.
 
+### 🌐 Nothing to install: the web version
+There is a stripped-down browser port at **https://nojukuramu.github.io/karaokenatin/** — open it
+on the TV's browser, let everyone scan the QR code, and their phones become remotes. It keeps the
+embedded player, search, queue, QR sharing and the remote, and drops the desktop-only parts
+(playlist library, scoring, mic coverage).
+
+The two differ where they have to. This app runs its own signalling and serves the guest UI over
+your LAN; a static site cannot, so the web version pairs peers through a public PeerJS broker and
+searches YouTube through public Piped/Invidious mirrors. Source lives in
+[`karaokenatin/`](https://github.com/nojukuramu/nojukuramu.github.io/tree/main/karaokenatin) in
+the site repo.
+
 ## 🚀 Getting Started
 
 ### For Singers
